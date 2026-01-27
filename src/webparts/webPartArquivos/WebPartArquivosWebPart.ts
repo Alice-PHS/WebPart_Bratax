@@ -23,6 +23,9 @@ export interface IWebPartArquivosWebPartProps {
   listaClientesCampo: string;
   listaLogURL: string;
   arquivosLocal: string;
+  colorBackground: string;
+  colorAccent: string;
+  colorFont: string;
 }
 
 export default class WebPartArquivosWebPart extends BaseClientSideWebPart<IWebPartArquivosWebPartProps> {
@@ -43,7 +46,10 @@ export default class WebPartArquivosWebPart extends BaseClientSideWebPart<IWebPa
         listaClientesCampo: this.properties.listaClientesCampo,
         listaLogURL: this.properties.listaLogURL,
         arquivosLocal: this.properties.arquivosLocal,
-        context: this.context
+        context: this.context,
+        colorBackground: this.properties.colorBackground,
+        colorAccent: this.properties.colorAccent,
+        colorFont: this.properties.colorFont
       }
     );
 
@@ -133,6 +139,18 @@ export default class WebPartArquivosWebPart extends BaseClientSideWebPart<IWebPa
               }),
               PropertyPaneTextField('arquivosLocal', {
                 label: "Caminho Local dos Arquivos (ex: https://{nome da empresa}.sharepoint.com/sites/{site}/{pasta})"
+              }),
+              PropertyPaneTextField('colorBackground', {
+                label: 'Cor do Fundo do Card',
+                description: 'Ex: #ffffff ou white'
+              }),
+              PropertyPaneTextField('colorAccent', {
+                label: 'Cor de Destaque',
+                description: 'Ex: #0078d4'
+              }),
+              PropertyPaneTextField('colorFont', {
+                label: 'Cor da Fonte',
+                description: 'Ex: #000000'
               })
             ]
           }

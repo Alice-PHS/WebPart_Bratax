@@ -10,5 +10,8 @@ export interface IWebPartArquivosProps {
   listaClientesCampo: string;
   listaLogURL: string;
   arquivosLocal: string;
+  colorBackground: string; // Cor do card/fundo
+  colorAccent: string;     // Destaque
+  colorFont: string;      // Fonte
   context: WebPartContext;
 }

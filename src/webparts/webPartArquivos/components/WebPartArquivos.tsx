@@ -9,8 +9,7 @@ import "@pnp/sp/folders";
 import { TextField, Dropdown, IDropdownOption, PrimaryButton, Stack, Label, Spinner, MessageBar, MessageBarType, SpinnerSize, Icon, IconButton } from '@fluentui/react';
 import styles from "./WebPartArquivos.module.scss";
 import JSZip from 'jszip';
-export type Screen = 'HOME' | 'UPLOAD' | 'VIEWER';
-import backgroundSource from './assets/Background.png';
+export type Screen = 'HOME' | 'UPLOAD' | 'VIEWER' | 'CLEANUP';
 
 export interface IFormState {
   currentScreen: Screen;
@@ -27,6 +26,9 @@ export interface IFormState {
   expandedFolders: { [key: string]: boolean }; // Para controlar quais pastas estão abertas
   nomeBaseEditavel: string; 
   sufixoFixo: string;
+  fileVersions: any[];
+  versionsToKeep: number;
+  
   }
 
 // Interface para os itens da lista de clientes
@@ -52,6 +54,8 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
       selectedFileUrl: null,
       folders: [],
       expandedFolders: {},
+      versionsToKeep: 2,
+      fileVersions: []
     };
   }
 
@@ -306,7 +310,7 @@ private _fazerUpload = async (): Promise<void> => {
   }
 }
 
-  // ---------------Visualização---------------
+  // ---------------Visualização do arquivo---------------
 
   private _carregarEstruturaArquivos = async (): Promise<void> => {
   try {
@@ -323,6 +327,76 @@ private _fazerUpload = async (): Promise<void> => {
     console.error("Erro ao carregar arquivos:", error);
     this.setState({ isLoading: false, statusMessage: "Erro ao carregar visualizador." });
   }
+}
+
+  // ---------------Versões do arquivo---------------
+  private _limparVersoesSelecionado = async (): Promise<void> => {
+  const { selectedFileUrl, fileVersions, versionsToKeep } = this.state;
+  if (!selectedFileUrl) return;
+
+  this.setState({ isLoading: true, statusMessage: "Analisando histórico de versões..." });
+
+  try {
+    // 1. Recarrega as versões para garantir que temos a lista atualizada
+    const versions = await this._sp.web.getFileByServerRelativePath(selectedFileUrl).versions();
+    
+    // O SharePoint armazena as versões da mais antiga para a mais recente.
+    // Se versions.length é 5 e queremos manter 2, deletamos as 3 primeiras (índices 0, 1, 2).
+    if (versions.length > versionsToKeep) {
+      const numToDelete = versions.length - versionsToKeep;
+      
+      this.setState({ statusMessage: `Removendo ${numToDelete} versões antigas...` });
+
+      for (let i = 0; i < numToDelete; i++) {
+        // Deletamos sempre a versão pelo ID interno do histórico
+        const versionId = versions[i].ID;
+        await this._sp.web.getFileByServerRelativePath(selectedFileUrl).versions.getById(versionId).delete();
+      }
+
+      this.setState({ 
+        statusMessage: "Otimização concluída! O arquivo principal foi mantido.", 
+        messageType: MessageBarType.success,
+        isLoading: false
+      });
+      
+      // Atualiza a lista de versões na tela
+      await this._carregarVersoesArquivo(selectedFileUrl);
+    } else {
+      this.setState({ 
+        statusMessage: "Este arquivo já está otimizado (poucas versões).", 
+        messageType: MessageBarType.info,
+        isLoading: false
+      });
+    }
+  } catch (error) {
+    console.error("Erro ao limpar versões:", error);
+    this.setState({ 
+      statusMessage: "Não foi possível remover as versões. Verifique suas permissões.", 
+      messageType: MessageBarType.error,
+      isLoading: false 
+    });
+  }
+}
+
+private _carregarVersoesArquivo = async (fileUrl: string): Promise<void> => {
+  try {
+    this.setState({ isLoading: true, statusMessage: "" });
+    const versions = await this._sp.web.getFileByServerRelativePath(fileUrl).versions();
+    this.setState({ fileVersions: versions, isLoading: false });
+  } catch (error) {
+    console.error("Erro ao carregar versões:", error);
+    this.setState({ isLoading: false, fileVersions: [] });
+  }
+}
+private _getPastasExistentesOptions = (): IDropdownOption[] => {
+  const { folders } = this.state;
+  if (!folders || folders.length === 0) return [];
+
+  // Mapeia o nome das pastas que vieram da biblioteca de documentos
+  return folders.map(folder => ({
+    key: folder.Name,
+    text: folder.Name
+  }));
 }
 
   // ---------------TELAS---------------
@@ -357,6 +431,16 @@ private _fazerUpload = async (): Promise<void> => {
           <Icon iconName="Tiles" className={styles.cardIcon} />
           <span className={styles.cardText}>Visualizar Arquivos</span>
         </div>
+        {/* Card de Limpeza */}
+        <div className={styles.actionCard} onClick={async () => {
+          this.setState({ currentScreen: 'CLEANUP', selectedCliente: '', statusMessage: '' });
+          
+          // IMPORTANTE: Primeiro carregamos a estrutura de pastas da biblioteca
+          await this._carregarEstruturaArquivos(); 
+      }}>
+        <Icon iconName="Broom" className={styles.cardIcon} />
+        <span className={styles.cardText}>Limpar Versões</span>
+      </div>
       </Stack>
     </div>
     )
@@ -468,14 +552,17 @@ private _renderUploadForm(): React.ReactElement {
                     expandedFolders: { ...expandedFolders, [folder.Name]: !expandedFolders[folder.Name] } 
                   })}>
                   <Icon iconName={expandedFolders[folder.Name] ? "ChevronDown" : "ChevronRight"} style={{ marginRight: 8, fontSize: 10 }} />
-                  <Icon iconName="FabricFolder" style={{ marginRight: 8, color: '#0078d4', fontSize: 16 }} />
+                  <Icon iconName="FabricFolder" style={{ marginRight: 8, color: 'var(--accent-custom)', fontSize: 16 }} />
                   <strong>{folder.Name}</strong>
                 </div>
 
                 {expandedFolders[folder.Name] && folder.Files.map((file: any) => (
                   <div key={file.Name} 
                        className={`${styles.sidebarFile} ${selectedFileUrl === file.ServerRelativeUrl ? styles.activeFile : ''}`}
-                       onClick={() => this.setState({ selectedFileUrl: file.ServerRelativeUrl })}>
+                        onClick={() => {
+                          this.setState({ selectedFileUrl: file.ServerRelativeUrl });
+                          void this._carregarVersoesArquivo(file.ServerRelativeUrl); // Chamada nova
+                        }}>
                     <Icon iconName="Page" style={{ marginRight: 8 }} />
                     {file.Name}
                   </div>
@@ -485,32 +572,159 @@ private _renderUploadForm(): React.ReactElement {
           </div>
 
           {/* Viewer */}
-          <div style={{ flex: 1, backgroundColor: '#f3f2f1' }}>
-            {selectedFileUrl ? (
-              <iframe src={`${selectedFileUrl}?web=1`} width="100%" height="100%" style={{ border: "none" }} />
-            ) : (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column', color: '#a19f9d' }}>
-                <Icon iconName="DocumentSearch" style={{ fontSize: 50, marginBottom: 15 }} />
-                <p>Selecione um arquivo para visualizar</p>
-              </div>
-            )}
-          </div>
+            <div style={{ flex: 1, backgroundColor: '#f3f2f1', display: 'flex', flexDirection: 'column' }}>
+              {selectedFileUrl ? (
+                <React.Fragment>
+                  {/* Área de Ações do Arquivo */}
+                  <div style={{ padding: '10px 20px', backgroundColor: '#fff', borderBottom: '1px solid #edebe9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 20 }}>
+                      <span style={{ fontWeight: 600 }}>Versões: {this.state.fileVersions.length}</span>
+                      <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 10 }}>
+                        <Label>Manter apenas:</Label>
+                        <TextField 
+                          type="number" 
+                          styles={{ root: { width: 60 } }} 
+                          value={this.state.versionsToKeep.toString()} 
+                          onChange={(e, v) => this.setState({ versionsToKeep: parseInt(v || '1') })}
+                        />
+                      </Stack>
+                      <PrimaryButton 
+                        iconProps={{ iconName: 'Broom' }} 
+                        text="Limpar Versões Antigas" 
+                        onClick={() => void this._limparVersoesSelecionado()}
+                        disabled={this.state.isLoading || this.state.fileVersions.length <= this.state.versionsToKeep}
+                      />
+                    </Stack>
+                    {this.state.statusMessage && (
+                      <MessageBar messageBarType={this.state.messageType} onDismiss={() => this.setState({statusMessage: ''})}>
+                        {this.state.statusMessage}
+                      </MessageBar>
+                    )}
+                  </div>
+
+                  {/* O iframe do documento */}
+                  <iframe src={`${selectedFileUrl}?web=1`} width="100%" height="100%" style={{ border: "none" }} />
+                </React.Fragment>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', flexDirection: 'column', color: '#a19f9d' }}>
+                  <Icon iconName="DocumentSearch" style={{ fontSize: 50, marginBottom: 15 }} />
+                  <p>Selecione um arquivo para visualizar e gerenciar versões</p>
+                </div>
+              )}
+            </div>
         </div>
       </div>
     );
   }
 
+  private _renderCleanup(): React.ReactElement {
+  const { selectedCliente, folders, isLoading, versionsToKeep } = this.state;
+
+  // Filtra a pasta do cliente selecionado dentro das pastas já carregadas
+  const folderDoCliente = folders.find(f => f.Name === selectedCliente);
+
+  return (
+    <div className={styles.containerCard}>
+      <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 10 }} className={styles.header}>
+        <IconButton iconProps={{ iconName: 'Back' }} onClick={() => this.setState({ currentScreen: 'HOME', statusMessage: '', selectedCliente: '' })} />
+        <h2 className={styles.title}>Otimizar Espaço por Cliente</h2>
+      </Stack>
+
+      <Stack tokens={{ childrenGap: 20 }} style={{ marginTop: 20 }}>
+        {/* 1. Seleção do Cliente */}
+        <Dropdown
+          label="Selecione a Pasta do Cliente (Existente no SharePoint):"
+          placeholder="Selecione uma pasta"
+          // Usamos as pastas reais da biblioteca aqui
+          options={this._getPastasExistentesOptions()} 
+          selectedKey={selectedCliente}
+          onChange={(e, option) => this.setState({ selectedCliente: option ? option.key as string : '' })}
+        />
+
+        {/* 2. Configuração de Versões */}
+        <TextField 
+          label="Quantas versões manter em cada arquivo?" 
+          type="number" 
+          styles={{ root: { width: 200 } }}
+          value={versionsToKeep.toString()}
+          onChange={(e, val) => this.setState({ versionsToKeep: parseInt(val || '2') })}
+        />
+
+        {this.state.statusMessage && (
+          <MessageBar messageBarType={this.state.messageType} onDismiss={() => this.setState({statusMessage: ''})}>
+            {this.state.statusMessage}
+          </MessageBar>
+        )}
+
+        <hr style={{ border: '0.5px solid #eee', margin: '10px 0' }} />
+
+        {/* 3. Lista de Arquivos do Cliente Selecionado */}
+        {selectedCliente && folderDoCliente ? (
+          <Stack tokens={{ childrenGap: 10 }}>
+            <Label>Arquivos encontrados na pasta "{selectedCliente}":</Label>
+            {folderDoCliente.Files.length > 0 ? (
+              folderDoCliente.Files.map((file: any) => (
+                <div key={file.Name} style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center', 
+                  padding: '10px', 
+                  background: '#f9f9f9', 
+                  borderRadius: '4px',
+                  border: '1px solid #edebe9'
+                }}>
+                  <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 10 }}>
+                    <Icon iconName="Page" style={{ color: 'var(--accent-custom)' }} />
+                    <span>{file.Name}</span>
+                  </Stack>
+                  
+                  <IconButton 
+                    iconProps={{ iconName: 'Broom' }} 
+                    title="Limpar versões deste arquivo" 
+                    disabled={isLoading}
+                    onClick={async () => {
+                      // Define este arquivo como selecionado e chama a limpeza
+                      await this.setState({ selectedFileUrl: file.ServerRelativeUrl });
+                      // Carrega as versões primeiro para saber se tem o que deletar
+                      await this._carregarVersoesArquivo(file.ServerRelativeUrl);
+                      void this._limparVersoesSelecionado();
+                    }}
+                  />
+                </div>
+              ))
+            ) : (
+              <p>Nenhum arquivo encontrado nesta pasta.</p>
+            )}
+          </Stack>
+        ) : selectedCliente && (
+          <p>Carregando arquivos do cliente ou pasta não encontrada...</p>
+        )}
+      </Stack>
+    </div>
+  );
+}
+
   public render(): React.ReactElement<IWebPartArquivosProps> {
-    return (
-      <div 
+  const { colorBackground, colorAccent, colorFont } = this.props;
+
+  const dynamicStyles: React.CSSProperties = {
+    '--bg-custom': colorBackground || '#ffffff',
+    '--accent-custom': colorAccent || '#0078d4',
+    '--font-custom': colorFont || '#323130', // Variável para a fonte
+    '--accent-light': (colorAccent || '#0078d4') + '15', // Cria uma versão com 15% de opacidade para hovers
+  } as React.CSSProperties;
+
+  return (
+    <div 
       className={styles.webPartArquivos} 
-      //style={{ backgroundImage: `url(${backgroundSource})` }}
+      style={dynamicStyles} // Aplicamos as variáveis aqui
     >
         {this.state.currentScreen === 'HOME' && this._renderHome()}
         {this.state.currentScreen === 'UPLOAD' && this._renderUploadForm()}
         {this.state.currentScreen === 'VIEWER' && this._renderFileViewer()}
+        {this.state.currentScreen === 'CLEANUP' && this._renderCleanup()}
     </div>
-    );
-  }
+  );
+}
 
 }

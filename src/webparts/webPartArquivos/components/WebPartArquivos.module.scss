@@ -2,8 +2,9 @@
 
 
 .webPartArquivos {
+  color: var(--font-custom);
   padding: 40px 20px;
-  min-height: 95%;
+  min-height: 80%;
   display: block;
   justify-content: center;
   align-items: flex-start; // Começa pelo topo para não cortar em telas pequenas
@@ -20,10 +21,10 @@
 
   .containerCard {
     width: 100%;
-    max-width: 98%;
+    max-width: 80%;
     margin: 0 auto;
     padding: 40px;
-    background:#ffffff !important; // Fundo branco
+    background: var(--bg-custom) !important; 
     border-radius: 12px;
     box-shadow: 0 10px 35px rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.3);
@@ -31,7 +32,7 @@
   }
 
   .viewerCard {
-    max-width: 98% !important; 
+    max-width: 80% !important; 
     width: 100% !important;
   }
 
@@ -44,9 +45,9 @@
     height: 180px;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     cursor: pointer; transition: 0.2s;
-    &:hover { border-color: #0078d4; background: #f0f7ff; transform: translateY(-2px); }
-    .cardIcon { font-size: 32px; color: #0078d4; margin-bottom: 10px; }
-    .cardText { font-weight: 600; color: #323130; }
+    &:hover { border-color: var(--accent-custom); background: #f0f7ff; transform: translateY(-2px); }
+    .cardIcon { font-size: 32px; color: var(--accent-custom) !important; margin-bottom: 10px; }
+    .cardText { font-weight: 600; color: var(--font-custom); }
     background: rgba(255, 255, 255, 0.9);
     border: 1px solid rgba(0, 120, 212, 0.2);
     &:hover {
@@ -56,13 +57,13 @@
 
   /* --- Upload --- */
   .header { border-bottom: 1px solid #edebe9; padding-bottom: 15px; margin-bottom: 20px; }
-  .title { margin: 0; font-size: 24px; font-weight: 600; }
+  .title { margin: 0; font-size: 24px; font-weight: 600; color: var(--font-custom); }
   
   .uploadContainer {
-    border: 2px dashed #0078d4; // Azul padrão Microsoft
+    border: 2px dashed var(--accent-custom); 
     padding: 30px;
     text-align: center;
-    background-color: #f3f9ff;
+    background-color: var(--accent-light);
     border-radius: 4px;
     transition: all 0.2s ease;
     margin-bottom: 20px;
@@ -97,6 +98,7 @@
       width: 180px;
       font-size: 16px;
       font-weight: 600;
+      color: var(--font-custom);
     }
     
     .inputContainer {
@@ -140,14 +142,14 @@
   }
   .sidebarItem {
     padding: 8px 12px; cursor: pointer; display: flex; align-items: center; transition: 0.1s;
-    color: #323130; font-size: 13px;
+    color: var(--font-custom) !important; font-size: 13px;
     &:hover { background-color: #f3f2f1; }
   }
   .sidebarFile {
-    padding: 6px 12px 6px 35px; cursor: pointer; display: flex; align-items: center; font-size: 12px;
-    &:hover { background-color: #f0f7ff; color: #0078d4; }
+    padding: 6px 12px 6px 35px; cursor: pointer; display: flex; align-items: center; font-size: 12px; color: var(--font-custom) !important;
+    &:hover { background-color: #f0f7ff; color: var(--accent-custom); }
   }
-  .activeFile { background-color: #deecf9 !important; color: #005a9e; font-weight: 600; }
+  .activeFile { background-color: var(--accent-light) !important; color: var(--accent-custom); font-weight: 600; }
 }}
 
 /*@import '~@fluentui/react/dist/sass/References.scss';
