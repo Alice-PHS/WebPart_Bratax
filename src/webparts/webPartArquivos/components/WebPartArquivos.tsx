@@ -287,6 +287,8 @@ private _fazerUpload = async (): Promise<void> => {
       messageType: MessageBarType.success,
       fileToUpload: [],
       nomeArquivo: '',
+      nomeBaseEditavel: '',
+      sufixoFixo: '',
       descricao: ''
     });
     
