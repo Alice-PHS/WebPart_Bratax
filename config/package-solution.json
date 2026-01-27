@@ -1,0 +1,40 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/package-solution.schema.json",
+  "solution": {
+    "name": "web-part-arquivos-client-side-solution",
+    "id": "9ea81c5a-b2b8-42ed-b2da-d66b068e26f2",
+    "version": "2.0.1.0",
+    "includeClientSideAssets": true,
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "developer": {
+      "name": "",
+      "websiteUrl": "",
+      "privacyUrl": "",
+      "termsOfUseUrl": "",
+      "mpnId": "Undefined-1.22.1"
+    },
+    "metadata": {
+      "shortDescription": {
+        "default": "WebPartArquivos description"
+      },
+      "longDescription": {
+        "default": "WebPartArquivos description"
+      },
+      "screenshotPaths": [],
+      "videoUrl": "",
+      "categories": []
+    },
+    "features": [
+      {
+        "title": "web-part-arquivos Feature",
+        "description": "The feature that activates elements of the web-part-arquivos solution.",
+        "id": "7b0b3b5d-4f9b-4724-b134-929e4424562f",
+        "version": "1.0.0.0"
+      }
+    ]
+  },
+  "paths": {
+    "zippedPackage": "solution/web-part-arquivos.sppkg"
+  }
+}

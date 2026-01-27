@@ -1,0 +1,169 @@
+@import '~@fluentui/react/dist/sass/References.scss';
+
+.webPartArquivos {
+  padding: 20px;
+  background-color: #f3f2f1;
+
+  .containerCard {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 25px;
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  }
+
+  /* --- Home --- */
+  .homeHeader { text-align: center; margin-bottom: 30px; }
+  .subtitle { color: #605e5c; margin-top: 8px; }
+  .homeActionArea { margin-top: 20px; }
+  .actionCard {
+    width: 180px; height: 140px; border: 1px solid #edebe9; border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    cursor: pointer; transition: 0.2s;
+    &:hover { border-color: #0078d4; background: #f0f7ff; transform: translateY(-2px); }
+    .cardIcon { font-size: 32px; color: #0078d4; margin-bottom: 10px; }
+    .cardText { font-weight: 600; color: #323130; }
+  }
+
+  /* --- Upload --- */
+  .header { border-bottom: 1px solid #edebe9; padding-bottom: 15px; margin-bottom: 20px; }
+  .title { margin: 0; font-size: 18px; font-weight: 600; }
+  
+  .uploadContainer {
+    border: 2px dashed #0078d4;
+    padding: 40px;
+    text-align: center; /* Centraliza o botão */
+    background-color: #faf9f8;
+    border-radius: 4px;
+    margin-bottom: 25px;
+    
+    .uploadLabel { font-weight: 600; margin-bottom: 15px; display: block; color: #323130; }
+    .fileInput { 
+      margin: 0 auto; 
+      max-width: 250px; 
+      display: block;
+    }
+    .fileSelectedInfo { color: #107c10; margin-top: 10px; }
+    .footerActions { margin-top: 20px; padding-top: 20px; border-top: 1px solid #f3f2f1; }
+  }
+
+  .formRow {
+    display: flex; gap: 20px; margin-bottom: 15px; align-items: flex-start;
+    .labelFixed { width: 140px; flex-shrink: 0; font-weight: 600; padding-top: 5px; }
+    .inputContainer { flex-grow: 1; }
+  }
+
+  /* Estilo do Input de Nome com Sufixo colado */
+  .nameInputGroup {
+    display: flex;
+    align-items: stretch;
+    :global(.ms-TextField) { flex-grow: 1; }
+    :global(.ms-TextField-fieldGroup) { border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  }
+  .suffixBadge {
+    background: #f3f2f1;
+    border: 1px solid #8a8886;
+    border-left: none;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    color: #605e5c;
+    font-size: 12px;
+    border-top-right-radius: 2px;
+    border-bottom-right-radius: 2px;
+    white-space: nowrap;
+  }
+
+  /* --- Visualizador --- */
+  .viewerLayout {
+    display: flex; height: 650px; border: 1px solid #edebe9; border-radius: 4px; overflow: hidden;
+  }
+  .sidebar {
+    width: 280px; background-color: #ffffff; border-right: 1px solid #edebe9; overflow-y: auto;
+  }
+  .sidebarItem {
+    padding: 8px 12px; cursor: pointer; display: flex; align-items: center; transition: 0.1s;
+    color: #323130; font-size: 13px;
+    &:hover { background-color: #f3f2f1; }
+  }
+  .sidebarFile {
+    padding: 6px 12px 6px 35px; cursor: pointer; display: flex; align-items: center; font-size: 12px;
+    &:hover { background-color: #f0f7ff; color: #0078d4; }
+  }
+  .activeFile { background-color: #deecf9 !important; color: #005a9e; font-weight: 600; }
+}
+
+/*@import '~@fluentui/react/dist/sass/References.scss';
+
+.webPartArquivos {
+  .containerCard {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 25px;
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  }
+
+  .homeHeader { text-align: center; margin-bottom: 40px; }
+  .title { margin: 0; font-size: 24px; color: #323130; }
+  .subtitle { color: #605e5c; margin-top: 8px; }
+
+  // Classes que estavam dando erro:
+  .homeActionArea {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    margin-top: 20px;
+  }
+
+  .actionCard {
+    width: 200px;
+    padding: 20px;
+    border: 1px solid #edebe9;
+    border-radius: 12px;
+    cursor: pointer;
+    text-align: center;
+    &:hover { border-color: #0078d4; background: #f3f9ff; }
+    .cardIcon { font-size: 42px; display: block; margin-bottom: 10px; }
+    .cardText { font-weight: 600; }
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #f3f2f1;
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+  }
+
+  .backButton { color: #0078d4; }
+
+  .formRow {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 15px;
+  }
+
+  .labelFixed { width: 150px; flex-shrink: 0; }
+  
+  .inputContainer { 
+    flex-grow: 1; 
+    width: 100%;
+  }
+
+  .uploadContainer {
+    border: 2px dashed #0078d4;
+    padding: 20px;
+    background: #f3f9ff;
+    text-align: center;
+  }
+
+  .fileInput { width: 100%; cursor: pointer; }
+  .uploadLabel { font-weight: 600; color: #0078d4; }
+  .fileSelectedInfo { color: #107c10; margin-top: 10px; }
+  .footerActions { margin-top: 20px; padding-top: 20px; border-top: 1px solid #f3f2f1; }
+  .emptyState { text-align: center; padding: 40px; }
+}*/

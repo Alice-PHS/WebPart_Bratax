@@ -1,0 +1,19 @@
+{
+  "@microsoft/generator-sharepoint": {
+    "useGulp": false,
+    "plusBeta": false,
+    "isCreatingSolution": true,
+    "nodeVersion": "18.17.1",
+    "sdksVersions": {},
+    "version": "1.22.1",
+    "libraryName": "web-part-arquivos",
+    "libraryId": "9ea81c5a-b2b8-42ed-b2da-d66b068e26f2",
+    "environment": "spo",
+    "packageManager": "npm",
+    "solutionName": "WebPartArquivos",
+    "solutionShortDescription": "WebPartArquivos description",
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "componentType": "webpart"
+  }
+}
