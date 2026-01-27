@@ -10,6 +10,7 @@ import { TextField, Dropdown, IDropdownOption, PrimaryButton, Stack, Label, Spin
 import styles from "./WebPartArquivos.module.scss";
 import JSZip from 'jszip';
 export type Screen = 'HOME' | 'UPLOAD' | 'VIEWER';
+import backgroundSource from './assets/Background.png';
 
 export interface IFormState {
   currentScreen: Screen;
@@ -366,7 +367,7 @@ private _renderUploadForm(): React.ReactElement {
       <div className={styles.containerCard}>
         <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 10 }} className={styles.header}>
           <IconButton iconProps={{ iconName: 'Back' }} onClick={() => this.setState({ currentScreen: 'HOME', statusMessage: '' })} />
-          <h2 className={styles.title}>Upload de Documento</h2>
+          <h2 className={styles.title}>Upload de Documento do Cliente</h2>
         </Stack>
 
         <Stack tokens={{ childrenGap: 20 }}>
@@ -457,9 +458,9 @@ private _renderUploadForm(): React.ReactElement {
           <h2 className={styles.title}>Visualizador de Documentos</h2>
         </Stack>
 
-        <div className={styles.viewerLayout}>
+        <div className={styles.viewerLayout} style={{ minHeight: '600px', display: 'flex' }}>
           {/* Sidebar */}
-          <div className={styles.sidebar}>
+          <div className={styles.sidebar} style={{ width: '300px', flexShrink: 0 }}>
             {isLoading && <Spinner size={SpinnerSize.medium} style={{margin: 20}} />}
             {folders.map(folder => (
               <div key={folder.Name}>
@@ -501,11 +502,14 @@ private _renderUploadForm(): React.ReactElement {
 
   public render(): React.ReactElement<IWebPartArquivosProps> {
     return (
-      <div className={styles.webPartArquivos}>
+      <div 
+      className={styles.webPartArquivos} 
+      //style={{ backgroundImage: `url(${backgroundSource})` }}
+    >
         {this.state.currentScreen === 'HOME' && this._renderHome()}
         {this.state.currentScreen === 'UPLOAD' && this._renderUploadForm()}
         {this.state.currentScreen === 'VIEWER' && this._renderFileViewer()}
-      </div>
+    </div>
     );
   }
 
