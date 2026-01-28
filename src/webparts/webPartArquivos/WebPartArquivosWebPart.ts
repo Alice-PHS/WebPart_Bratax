@@ -129,16 +129,20 @@ export default class WebPartArquivosWebPart extends BaseClientSideWebPart<IWebPa
             groupName: "Dados",
             groupFields: [
               PropertyPaneTextField('listaClientesURL', {
-                label: "Nome da Lista de Clientes (ex: https://{nome da empresa}.sharepoint.com/sites/{site}/Lists/Clientes)"
+                label: "Nome da Lista de Clientes",
+                description:"Ex: https://{nome da empresa}.sharepoint.com/sites/{site}/Lists/Clientes"
               }),
               PropertyPaneTextField('listaClientesCampo', {
-                label: "Nome do Campo da Lista de Clientes (ex: Raz_x00e3_o_x0020_social)"
+                label: "Nome do Campo da Lista de Clientes",
+                description:"Ex: Raz_x00e3_o_x0020_social"
               }),
               PropertyPaneTextField('listaLogURL', {
-                label: "Nome da Lista de Log (ex: https://{nome da empresa}.sharepoint.com/sites/{site}/Lists/Log)"
+                label: "Nome da Lista de Log ",
+                description:"Ex: https://{nome da empresa}.sharepoint.com/sites/{site}/Lists/Log"
               }),
               PropertyPaneTextField('arquivosLocal', {
-                label: "Caminho Local dos Arquivos (ex: https://{nome da empresa}.sharepoint.com/sites/{site}/{pasta})"
+                label: "Caminho Local dos Arquivos ",
+                description:"Ex: https://{nome da empresa}.sharepoint.com/sites/{site}/{pasta}"
               }),
               PropertyPaneTextField('colorBackground', {
                 label: 'Cor do Fundo do Card',
