@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { IWebPartArquivosProps } from './IWebPartArquivosProps';
 import { SPFI, spfi, SPFx } from "@pnp/sp";
-import { Web } from "@pnp/sp/webs"; // Importação correta do objeto Web
+import { Web } from "@pnp/sp/webs"; 
 import "@pnp/sp/lists";
 import "@pnp/sp/items";
 import "@pnp/sp/files";
@@ -23,7 +23,8 @@ export interface IFormState {
   messageType: MessageBarType;
   selectedFileUrl: string | null;
   folders: any[];
-  expandedFolders: { [key: string]: boolean }; // Para controlar quais pastas estão abertas
+  expandedFolders: { [key: string]: boolean };
+  loadedFolders: { [key: string]: boolean };
   nomeBaseEditavel: string; 
   sufixoFixo: string;
   fileVersions: any[];
@@ -50,10 +51,10 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
       isLoading: false,
       statusMessage: '',
       messageType: MessageBarType.info,
-      // No constructor (state inicial)
       selectedFileUrl: null,
       folders: [],
       expandedFolders: {},
+      loadedFolders: {},
       versionsToKeep: 2,
       fileVersions: []
     };
@@ -312,21 +313,269 @@ private _fazerUpload = async (): Promise<void> => {
 
   // ---------------Visualização do arquivo---------------
 
-  private _carregarEstruturaArquivos = async (): Promise<void> => {
+  
+private _getTargetWeb = () => {
+  const inputUrl = this.props.arquivosLocal;
+  
+  if (!inputUrl) return this._sp.web; // Fallback se estiver vazio
+
+  try {
+    const urlObj = new URL(inputUrl);
+    
+    // Remove a barra final se existir para não errar o cálculo
+    let path = urlObj.pathname;
+    if (path.endsWith('/')) path = path.slice(0, -1);
+    
+    // Separa os pedaços da URL. 
+    // Ex: /marketing/Documentos vira ['marketing', 'Documentos']
+    const pathSegments = path.split('/').filter(p => p);
+    
+    // Remove o último pedaço (que assumimos ser a Biblioteca 'Documentos')
+    // Sobra apenas o site (ex: 'marketing')
+    pathSegments.pop();
+    
+    // Reconstrói a URL do SITE
+    const siteUrl = `${urlObj.origin}/${pathSegments.join('/')}`;
+    
+    console.log("Conectando ao site:", siteUrl); // Para debug
+
+    return Web(siteUrl).using(SPFx(this.props.context));
+  } catch (e) {
+    console.error("Erro ao calcular URL do site", e);
+    return this._sp.web;
+  }
+}
+
+private _carregarEstruturaArquivos = async (): Promise<void> => {
   try {
     this.setState({ isLoading: true });
+    
+    const baseUrl = this.props.arquivosLocal;
+    if (!baseUrl) {
+         this.setState({ isLoading: false, statusMessage: "URL não configurada." });
+         return;
+    }
+
+    const urlObj = new URL(baseUrl);
+    let relativePath = decodeURIComponent(urlObj.pathname);
+    
+    // Remove barra final se houver
+    if (relativePath.endsWith('/')) relativePath = relativePath.slice(0, -1);
+
+    // FIX: Usamos o _getTargetWeb() para conectar no site do Marketing
+    const targetWeb = this._getTargetWeb();
+
+    console.log("Tentando acessar:", relativePath);
+
+    // 1. Busca APENAS o nível raiz daquela biblioteca
+    const rootFolder = targetWeb.getFolderByServerRelativePath(relativePath);
+    
+    const [subFolders, files] = await Promise.all([
+        rootFolder.folders.select("Name", "ServerRelativeUrl", "ItemCount")(),
+        rootFolder.files.select("Name", "ServerRelativeUrl", "TimeLastModified", "ServerRelativePath")()
+    ]);
+
+    const estruturaRaiz = subFolders.map(f => ({
+        ...f,
+        Files: [],   
+        Folders: [], 
+        isLoaded: false
+    }));
+    
+    // Se tiver arquivos soltos na raiz, podemos exibi-los ou adaptar a lógica.
+    // Aqui estamos salvando na estrutura principal.
+    
+    this.setState({ 
+        folders: estruturaRaiz, 
+        isLoading: false,
+        loadedFolders: {} 
+    });
+
+  } catch (error: any) {
+    console.error("Erro ao carregar raiz:", error);
+    let msg = "Erro ao acessar a biblioteca.";
+    
+    // Tratamento de erro específico para ajudar no debug
+    if (error.message && error.message.indexOf("ServerRelativeUrl") > -1) {
+        msg = "Erro de Contexto: Verifique se a URL está correta e se você tem acesso ao site /marketing.";
+    } else if (error.status === 404) {
+        msg = "Pasta ou Biblioteca não encontrada na URL fornecida.";
+    }
+
+    this.setState({ isLoading: false, statusMessage: msg });
+  }
+}
+  /*private _carregarEstruturaArquivos = async (): Promise<void> => {
+  try {
+    this.setState({ isLoading: true });
+    
+    // Tratamento robusto da URL para evitar erros de caminho
     const baseUrl = this.props.arquivosLocal;
     const urlObj = new URL(baseUrl);
-    const relativePath = decodeURIComponent(urlObj.pathname);
-
-    // Busca pastas e arquivos (1 nível de profundidade para performance, ou recursivo)
-    const library = await this._sp.web.getFolderByServerRelativePath(relativePath).folders.expand("Files")();
+    let relativePath = decodeURIComponent(urlObj.pathname);
     
-    this.setState({ folders: library, isLoading: false });
+    // Remove slash final se existir e ajusta para buscar a raiz
+    if (relativePath.endsWith('/')) relativePath = relativePath.slice(0, -1);
+
+    // 1. Busca APENAS o nível raiz (sem expand recursivo profundo)
+    const rootFolder = this._sp.web.getFolderByServerRelativePath(relativePath);
+    
+    // Promise.all para buscar pastas e arquivos paralelamente
+    const [subFolders, files] = await Promise.all([
+        rootFolder.folders.select("Name", "ServerRelativeUrl", "ItemCount")(),
+        rootFolder.files.select("Name", "ServerRelativeUrl", "TimeLastModified", "ServerRelativePath")()
+    ]);
+
+    // Monta estrutura inicial
+    const estruturaRaiz = subFolders.map(f => ({
+        ...f,
+        Files: [],   // Começa vazio
+        Folders: [], // Começa vazio
+        isLoaded: false // Flag interna
+    }));
+    
+    this.setState({ 
+        folders: estruturaRaiz, 
+        isLoading: false,
+        // Marcamos a raiz como carregada? Não exatamente, marcamos as pastas filhas como NÃO carregadas.
+        loadedFolders: {} 
+    });
+
   } catch (error) {
-    console.error("Erro ao carregar arquivos:", error);
-    this.setState({ isLoading: false, statusMessage: "Erro ao carregar visualizador." });
+    console.error("Erro ao carregar raiz:", error);
+    this.setState({ isLoading: false, statusMessage: "Erro ao acessar a biblioteca. Verifique permissões." });
   }
+}*/
+  
+private _onExpandFolder = async (folderUrl: string): Promise<void> => {
+    const { expandedFolders, loadedFolders } = this.state;
+    const isExpanded = !!expandedFolders[folderUrl];
+    const isLoaded = !!loadedFolders[folderUrl];
+
+    this.setState({
+        expandedFolders: { ...expandedFolders, [folderUrl]: !isExpanded }
+    });
+
+    if (!isExpanded && !isLoaded) {
+        try {
+            // Usa o site correto calculado
+            const targetWeb = this._getTargetWeb();
+            
+            // folderUrl já é o caminho completo (ex: /marketing/Documentos/PastaA)
+            const targetFolder = targetWeb.getFolderByServerRelativePath(folderUrl);
+            
+            const [subFolders, files] = await Promise.all([
+                targetFolder.folders.select("Name", "ServerRelativeUrl", "ItemCount")(),
+                targetFolder.files.select("Name", "ServerRelativeUrl", "TimeLastModified")()
+            ]);
+
+            this._atualizarArvorePastas(folderUrl, subFolders, files);
+
+        } catch (error) {
+            console.error(`Erro ao carregar pasta ${folderUrl}`, error);
+        }
+    }
+}
+
+// Função auxiliar recursiva para encontrar onde injetar os novos dados no state
+private _atualizarArvorePastas = (targetUrl: string, newFolders: any[], newFiles: any[]) => {
+    const { folders, loadedFolders } = this.state;
+
+    // Função recursiva pura para clonar e atualizar a árvore
+    const updateRecursive = (list: any[]): any[] => {
+        return list.map(item => {
+            if (item.ServerRelativeUrl === targetUrl) {
+                // ACHOU! Atualiza o conteúdo desta pasta
+                return {
+                    ...item,
+                    Folders: newFolders.map(f => ({ ...f, Folders: [], Files: [] })), // Prepara placeholders
+                    Files: newFiles
+                };
+            } else if (item.Folders && item.Folders.length > 0) {
+                // Não é aqui, procura nos filhos
+                return {
+                    ...item,
+                    Folders: updateRecursive(item.Folders)
+                };
+            }
+            return item;
+        });
+    };
+
+    const novaArvore = updateRecursive(folders);
+
+    this.setState({
+        folders: novaArvore,
+        loadedFolders: { ...loadedFolders, [targetUrl]: true }, // Marca como carregado para não buscar de novo
+        statusMessage: ""
+    });
+}
+  private _renderRecursiveFolder = (folder: any, level: number = 0): React.ReactElement => {
+    const { expandedFolders, selectedFileUrl, loadedFolders } = this.state;
+    const folderKey = folder.ServerRelativeUrl;
+    const isExpanded = !!expandedFolders[folderKey];
+    const isLoaded = !!loadedFolders[folderKey]; // Verifica se já carregou dados
+    
+    const paddingLeft = 10 + (level * 15);
+  
+    return (
+      <div key={folderKey}>
+        <div 
+          className={styles.sidebarItem} 
+          style={{ paddingLeft: `${paddingLeft}px`, cursor: 'pointer', display: 'flex', alignItems: 'center', paddingTop: 4, paddingBottom: 4 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            // AQUI É A MUDANÇA PRINCIPAL: Chama a função inteligente
+            void this._onExpandFolder(folderKey);
+          }}
+        >
+          {/* Ícone muda se estiver carregando? Opcional, mas ajuda UX */}
+          <Icon iconName={isExpanded ? "ChevronDown" : "ChevronRight"} style={{ marginRight: 8, fontSize: 10 }} />
+          <Icon iconName="FabricFolder" style={{ marginRight: 8, color: 'var(--accent-custom)', fontSize: 16 }} />
+          <strong>{folder.Name}</strong>
+        </div>
+  
+        {isExpanded && (
+          <div>
+            {/* Se expandiu mas não carregou (rede lenta), mostra Loading */}
+            {!isLoaded && (folder.ItemCount > 0) && (
+                 <div style={{ paddingLeft: `${paddingLeft + 20}px` }}>
+                    <Spinner size={SpinnerSize.xSmall} label="Carregando itens..." labelPosition="right" />
+                 </div>
+            )}
+
+            {/* Renderiza Subpastas */}
+            {folder.Folders && folder.Folders.map((subFolder: any) => 
+               this._renderRecursiveFolder(subFolder, level + 1)
+            )}
+  
+            {/* Renderiza Arquivos */}
+            {folder.Files && folder.Files.map((file: any) => (
+                <div 
+                    key={file.ServerRelativeUrl} 
+                    className={`${styles.sidebarFile} ${selectedFileUrl === file.ServerRelativeUrl ? styles.activeFile : ''}`}
+                    style={{ paddingLeft: `${paddingLeft + 20}px` }} 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      this.setState({ selectedFileUrl: file.ServerRelativeUrl });
+                      void this._carregarVersoesArquivo(file.ServerRelativeUrl);
+                    }}
+                >
+                  <Icon iconName="Page" style={{ marginRight: 8 }} />
+                  {file.Name}
+                </div>
+              ))}
+             
+             {/* Mensagem de Vazio */}
+             {isLoaded && (!folder.Folders || folder.Folders.length === 0) && (!folder.Files || folder.Files.length === 0) && (
+                <div style={{ paddingLeft: `${paddingLeft + 20}px`, fontSize: '11px', color: '#888', fontStyle: 'italic' }}>
+                    (Pasta vazia)
+                </div>
+             )}
+          </div>
+        )}
+      </div>
+    );
 }
 
   // ---------------Versões do arquivo---------------
@@ -544,31 +793,15 @@ private _renderUploadForm(): React.ReactElement {
 
         <div className={styles.viewerLayout} style={{ minHeight: '600px', display: 'flex' }}>
           {/* Sidebar */}
-          <div className={styles.sidebar} style={{ width: '300px', flexShrink: 0 }}>
+          <div className={styles.sidebar} style={{ width: '300px', flexShrink: 0, overflowY: 'auto', borderRight: '1px solid #eee' }}>
             {isLoading && <Spinner size={SpinnerSize.medium} style={{margin: 20}} />}
-            {folders.map(folder => (
-              <div key={folder.Name}>
-                <div className={styles.sidebarItem} onClick={() => this.setState({ 
-                    expandedFolders: { ...expandedFolders, [folder.Name]: !expandedFolders[folder.Name] } 
-                  })}>
-                  <Icon iconName={expandedFolders[folder.Name] ? "ChevronDown" : "ChevronRight"} style={{ marginRight: 8, fontSize: 10 }} />
-                  <Icon iconName="FabricFolder" style={{ marginRight: 8, color: 'var(--accent-custom)', fontSize: 16 }} />
-                  <strong>{folder.Name}</strong>
-                </div>
-
-                {expandedFolders[folder.Name] && folder.Files.map((file: any) => (
-                  <div key={file.Name} 
-                       className={`${styles.sidebarFile} ${selectedFileUrl === file.ServerRelativeUrl ? styles.activeFile : ''}`}
-                        onClick={() => {
-                          this.setState({ selectedFileUrl: file.ServerRelativeUrl });
-                          void this._carregarVersoesArquivo(file.ServerRelativeUrl); // Chamada nova
-                        }}>
-                    <Icon iconName="Page" style={{ marginRight: 8 }} />
-                    {file.Name}
-                  </div>
-                ))}
-              </div>
-            ))}
+            
+            {/* Aqui chamamos a função recursiva para cada pasta raiz */}
+            {folders && folders.length > 0 ? (
+                folders.map(folder => this._renderRecursiveFolder(folder))
+            ) : (
+                !isLoading && <div style={{padding:20}}>Nenhuma pasta encontrada.</div>
+            )}
           </div>
 
           {/* Viewer */}
