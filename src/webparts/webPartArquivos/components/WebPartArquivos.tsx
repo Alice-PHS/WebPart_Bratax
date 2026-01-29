@@ -1,5 +1,175 @@
 import * as React from 'react';
 import { IWebPartArquivosProps } from './IWebPartArquivosProps';
+import { SharePointService } from '../services/SharePointService';
+import { HomeScreen } from './screens/HomeScreen';
+import { UploadScreen } from './screens/UploadScreen';
+import { ViewerScreen } from './screens/ViewerScreen';
+import { CleanupScreen } from './screens/CleanupScreen';
+import { ClientsScreen } from './screens/ClientsScreen';
+import { MessageBar, MessageBarType, Icon } from '@fluentui/react';
+import styles from "./WebPartArquivos.module.scss";
+import { Screen } from '../models/IAppState';
+
+interface IMainState {
+  currentScreen: Screen;
+  statusMessage: string;
+  isLoading: boolean;
+  messageType: MessageBarType;
+}
+
+export default class WebPartArquivos extends React.Component<IWebPartArquivosProps, IMainState> {
+  private _spService: SharePointService;
+
+  constructor(props: IWebPartArquivosProps) {
+    super(props);
+    this._spService = new SharePointService(this.props.context);
+    this.state = {
+      currentScreen: 'HOME',
+      statusMessage: '',
+      isLoading: false,
+      messageType: MessageBarType.info
+    };
+  }
+
+  private _handleStatus = (msg: string, isLoading: boolean, type: MessageBarType = MessageBarType.info) => {
+    this.setState({ statusMessage: msg, isLoading, messageType: type });
+  };
+
+  private _navigate = (screen: Screen) => {
+    this.setState({ currentScreen: screen, statusMessage: '' });
+  };
+
+  public render(): React.ReactElement<IWebPartArquivosProps> {
+    const { currentScreen, statusMessage, messageType } = this.state;
+    const userEmail = this.props.context.pageContext.user.email || "usuario@empresa.com";
+    const userInitial = userEmail.substring(0, 2).toUpperCase();
+
+    // Títulos da tela superior baseados na seleção
+    let pageTitle = "Dashboard";
+    if (currentScreen === 'UPLOAD') pageTitle = "Novo Upload";
+    if (currentScreen === 'VIEWER') pageTitle = "Meus Documentos";
+    if (currentScreen === 'CLEANUP') pageTitle = "Manutenção e Limpeza";
+    if (currentScreen === 'CLIENTS') pageTitle = "Cadastro de Clientes";
+
+    return (
+      <div className={styles.webPartArquivos}>
+        <div className={styles.dashboardContainer}>
+          
+          {/* --- SIDEBAR FIXA --- */}
+          <aside className={styles.sidebarContainer}>
+            <div className={styles.logoArea}>
+              <div className={styles.logoIcon}><Icon iconName="SharepointLogo" /></div>
+              <div className={styles.logoText}>
+                <h2>SmartGED</h2><span>SharePoint Manager</span>
+              </div>
+            </div>
+
+            <nav className={styles.navMenu}>
+              <button className={`${styles.navItem} ${currentScreen === 'HOME' ? styles.active : ''}`} onClick={() => this._navigate('HOME')}>
+                <Icon iconName="GridViewMedium" /><span>Dashboard</span>
+              </button>
+              
+              <span className={styles.sectionTitle}>BIBLIOTECAS</span>
+              
+              <button className={`${styles.navItem} ${currentScreen === 'VIEWER' ? styles.active : ''}`} onClick={() => this._navigate('VIEWER')}>
+                <Icon iconName="FabricFolder" /><span>Meus Documentos</span>
+              </button>
+
+              <button className={`${styles.navItem} ${currentScreen === 'UPLOAD' ? styles.active : ''}`} onClick={() => this._navigate('UPLOAD')}>
+                <Icon iconName="CloudUpload" /><span>Novo Upload</span>
+              </button>
+
+              {/* SEÇÃO ADMINISTRAÇÃO */}
+              <span className={styles.sectionTitle}>ADMINISTRAÇÃO</span>
+              
+              <button className={`${styles.navItem} ${currentScreen === 'CLIENTS' ? styles.active : ''}`} onClick={() => this._navigate('CLIENTS')}>
+                <Icon iconName="AddFriend" /><span>Novo Cliente</span>
+              </button>
+
+              <button className={`${styles.navItem} ${currentScreen === 'CLEANUP' ? styles.active : ''}`} onClick={() => this._navigate('CLEANUP')}>
+                <Icon iconName="Broom" /><span>Manutenção</span>
+              </button>
+            </nav>
+
+            <div className={styles.userProfile}>
+              <div className={styles.avatarCircle}>{userInitial}</div>
+              <div className={styles.userInfo}>
+                <strong>Usuário Conectado</strong>
+                <span>{userEmail}</span>
+              </div>
+            </div>
+          </aside>
+
+          {/* --- CONTEÚDO DINÂMICO --- */}
+          <main className={styles.mainContent}>
+            
+            {/* Header Superior Comum */}
+            <header className={styles.topHeader}>
+              <h1>{pageTitle}</h1>
+              <div style={{display:'flex', gap:10}}>
+                  {/* Se tiver mensagem global, aparece aqui */}
+              </div>
+            </header>
+
+            {/* Mensagem de Status Global (se houver) */}
+            {statusMessage && (
+               <div style={{padding: '0 32px 10px 32px'}}>
+                 <MessageBar messageBarType={messageType} onDismiss={() => this.setState({ statusMessage: '' })}>
+                   {statusMessage}
+                 </MessageBar>
+               </div>
+            )}
+
+            {/* Área de Scroll onde as telas são carregadas */}
+            <div className={styles.contentScrollable}>
+              
+              {currentScreen === 'HOME' && <HomeScreen onNavigate={this._navigate} />}
+
+              {currentScreen === 'UPLOAD' && (
+                <UploadScreen 
+                  spService={this._spService}
+                  webPartProps={this.props}
+                  onBack={() => this._navigate('HOME')} // O botão voltar leva pra home
+                  onStatus={this._handleStatus}
+                />
+              )}
+
+              {currentScreen === 'VIEWER' && (
+                <ViewerScreen 
+                  spService={this._spService}
+                  webPartProps={this.props}
+                  onBack={() => this._navigate('HOME')}
+                  onStatus={this._handleStatus}
+                />
+              )}
+
+              {currentScreen === 'CLIENTS' && (
+                <ClientsScreen
+                    spService={this._spService}
+                    webPartProps={this.props}
+                    onStatus={this._handleStatus}
+                />
+              )}
+
+              {currentScreen === 'CLEANUP' && (
+                <CleanupScreen 
+                  spService={this._spService}
+                  webPartProps={this.props}
+                  onBack={() => this._navigate('HOME')}
+                  onStatus={this._handleStatus}
+                />
+              )}
+
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+}
+
+/*import * as React from 'react';
+import { IWebPartArquivosProps } from './IWebPartArquivosProps';
 import { SPFI, spfi, SPFx } from "@pnp/sp";
 import { Web } from "@pnp/sp/webs";
 import "@pnp/sp/lists";
@@ -615,7 +785,7 @@ private _atualizarArvorePastas = (targetUrl: string, newFolders: any[], newFiles
             void this._onExpandFolder(folderKey);
           }}
         >
-          {/* Ícone muda se estiver carregando? Opcional, mas ajuda UX */}
+          {/* Ícone muda se estiver carregando? Opcional, mas ajuda UX }
           <Icon iconName={isExpanded ? "ChevronDown" : "ChevronRight"} style={{ marginRight: 8, fontSize: 10 }} />
           <Icon iconName="FabricFolder" style={{ marginRight: 8, color: 'var(--accent-custom)', fontSize: 16 }} />
           <strong>{folder.Name}</strong>
@@ -623,19 +793,19 @@ private _atualizarArvorePastas = (targetUrl: string, newFolders: any[], newFiles
  
         {isExpanded && (
           <div>
-            {/* Se expandiu mas não carregou (rede lenta), mostra Loading */}
+            {/* Se expandiu mas não carregou (rede lenta), mostra Loading }
             {!isLoaded && (folder.ItemCount > 0) && (
                  <div style={{ paddingLeft: `${paddingLeft + 20}px` }}>
                     <Spinner size={SpinnerSize.xSmall} label="Carregando itens..." labelPosition="right" />
                  </div>
             )}
 
-            {/* Renderiza Subpastas */}
+            {/* Renderiza Subpastas }
             {folder.Folders && folder.Folders.map((subFolder: any) =>
                this._renderRecursiveFolder(subFolder, level + 1)
             )}
  
-            {/* Renderiza Arquivos */}
+            {/* Renderiza Arquivos }
             {folder.Files && folder.Files.map((file: any) => (
                 <div
                     key={file.ServerRelativeUrl}
@@ -652,7 +822,7 @@ private _atualizarArvorePastas = (targetUrl: string, newFolders: any[], newFiles
                 </div>
               ))}
              
-             {/* Mensagem de Vazio */}
+             {/* Mensagem de Vazio }
              {isLoaded && (!folder.Folders || folder.Folders.length === 0) && (!folder.Files || folder.Files.length === 0) && (
                 <div style={{ paddingLeft: `${paddingLeft + 20}px`, fontSize: '11px', color: '#888', fontStyle: 'italic' }}>
                     (Pasta vazia)
@@ -800,7 +970,7 @@ private _filtrarEstrutura = (folders: any[], files: any[], term: string) => {
           tokens={{ childrenGap: 30 }}
           className={styles.homeActionArea}
         >
-          {/* Card de Upload */}
+          {/* Card de Upload }
           <div className={styles.actionCard} onClick={() => {
               this.setState({ currentScreen: 'UPLOAD' });
               void this._carregarClientes();
@@ -809,7 +979,7 @@ private _filtrarEstrutura = (folders: any[], files: any[], term: string) => {
             <span className={styles.cardText}>Upload de Arquivos</span>
           </div>
 
-          {/* Card de Visualização */}
+          {/* Card de Visualização }
           <div className={styles.actionCard} onClick={() => {
             this.setState({ currentScreen: 'VIEWER' });
             void this._carregarEstruturaArquivos();
@@ -817,7 +987,7 @@ private _filtrarEstrutura = (folders: any[], files: any[], term: string) => {
           <Icon iconName="Tiles" className={styles.cardIcon} />
           <span className={styles.cardText}>Visualizar Arquivos</span>
         </div>
-        {/* Card de Limpeza */}
+        {/* Card de Limpeza }
         <div className={styles.actionCard} onClick={async () => {
           this.setState({ currentScreen: 'CLEANUP', selectedCliente: '', statusMessage: '' });
          
@@ -847,7 +1017,7 @@ private _renderUploadForm(): React.ReactElement {
             </MessageBar>
           )}
 
-          {/* Área de Upload Centralizada */}
+          {/* Área de Upload Centralizada}
           <div className={styles.uploadContainer}>
             <Label className={styles.uploadLabel}>1. Escolha o arquivo do seu computador</Label>
             <input id="fileInput" type="file" multiple onChange={(e) => {void this._onFileSelected(e)}} className={styles.fileInput} title="Selecionar arquivo" />
@@ -859,7 +1029,7 @@ private _renderUploadForm(): React.ReactElement {
             )}
           </div>
 
-          {/* Cliente - Alinhado */}
+          {/* Cliente - Alinhado }
           <div className={styles.formRow}>
             <Label required className={styles.labelFixed}>Cliente (Pasta)</Label>
             <div className={styles.inputContainer}>
@@ -874,7 +1044,7 @@ private _renderUploadForm(): React.ReactElement {
             </div>
           </div>
 
-          {/* Nome do Arquivo com Sufixo Dinâmico */}
+          {/* Nome do Arquivo com Sufixo Dinâmico }
           <div className={styles.formRow}>
             <Label required className={styles.labelFixed}>Nome do Arquivo</Label>
             <div className={styles.inputContainer}>
@@ -958,10 +1128,10 @@ private _renderUploadForm(): React.ReactElement {
 
           {isLoading && <Spinner size={SpinnerSize.medium} style={{margin: 20}} />}
           
-          {/* Renderiza as Pastas Filtradas */}
+          {/* Renderiza as Pastas Filtradas }
           {filteredFolders.map((folder: any) => this._renderRecursiveFolder(folder))}
 
-          {/* Renderiza os Arquivos da Raiz Filtrados */}
+          {/* Renderiza os Arquivos da Raiz Filtrados }
           {filteredFiles.length > 0 && (
             <div>
               {filteredFolders.length > 0 && <div style={{ borderTop: '1px solid #eee', margin: '10px 10px' }}></div>}
@@ -987,11 +1157,11 @@ private _renderUploadForm(): React.ReactElement {
           )}
         </div>
 
-          {/* Viewer */}
+          {/* Viewer }
             <div style={{ flex: 1, backgroundColor: '#f3f2f1', display: 'flex', flexDirection: 'column' }}>
               {selectedFileUrl ? (
                 <React.Fragment>
-                  {/* Área de Ações do Arquivo */}
+                  {/* Área de Ações do Arquivo }
                   <div style={{ padding: '10px 20px', backgroundColor: '#fff', borderBottom: '1px solid #edebe9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 20 }}>
                       <span style={{ fontWeight: 600 }}>Versões: {this.state.fileVersions.length}</span>
@@ -1018,7 +1188,7 @@ private _renderUploadForm(): React.ReactElement {
                     )}
                   </div>
 
-                  {/* O iframe do documento */}
+                  {/* O iframe do documento }
                   <iframe src={`${selectedFileUrl}?web=1`} width="100%" height="100%" style={{ border: "none" }} />
                 </React.Fragment>
               ) : (
@@ -1047,7 +1217,7 @@ private _renderUploadForm(): React.ReactElement {
       </Stack>
 
       <Stack tokens={{ childrenGap: 20 }} style={{ marginTop: 20 }}>
-        {/* 1. Seleção do Cliente */}
+        {/* 1. Seleção do Cliente }
         <Dropdown
           label="Selecione a Pasta do Cliente (Existente no SharePoint):"
           placeholder="Selecione uma pasta"
@@ -1057,7 +1227,7 @@ private _renderUploadForm(): React.ReactElement {
           onChange={(e, option) => this.setState({ selectedCliente: option ? option.key as string : '' })}
         />
 
-        {/* 2. Configuração de Versões */}
+        {/* 2. Configuração de Versões }
         <TextField
           label="Quantas versões manter em cada arquivo?"
           type="number"
@@ -1072,7 +1242,7 @@ private _renderUploadForm(): React.ReactElement {
           </MessageBar>
         )}
         <hr style={{ border: '0.5px solid #eee', margin: '10px 0' }} />
-        {/* 3. Lista de Arquivos do Cliente Selecionado */}
+        {/* 3. Lista de Arquivos do Cliente Selecionado }
         {selectedCliente && folderDoCliente ? (
           <Stack tokens={{ childrenGap: 10 }}>
             <Label>Arquivos encontrados na pasta "{selectedCliente}":</Label>
@@ -1140,4 +1310,4 @@ private _renderUploadForm(): React.ReactElement {
     </div>
   );
 }
-}
+}*/
