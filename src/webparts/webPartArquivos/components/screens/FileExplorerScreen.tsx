@@ -436,7 +436,5 @@ const handleAdvancedSearchLaunch = () => {
   </div>
 </Modal>
   </div>
-
-  
 );
 };

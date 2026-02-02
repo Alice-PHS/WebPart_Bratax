@@ -6,15 +6,14 @@ import "@pnp/sp/files";
 import "@pnp/sp/folders";
 import "@pnp/sp/site-users/web";
 import "@pnp/sp/profiles";
-import { ISearchQuery, SearchResults } from "@pnp/sp/search";
-import { IWebPartContext } from "@microsoft/sp-webpart-base";
+import {  WebPartContext } from "@microsoft/sp-webpart-base";
 import { SPHttpClient, SPHttpClientResponse } from '@microsoft/sp-http';
 
 export class SharePointService {
   private _sp: SPFI;
-  private _context: IWebPartContext;
+  private _context: WebPartContext;
 
-  constructor(context: IWebPartContext) {
+  constructor(context: WebPartContext) {
     this._context = context;
     // Inicializa a instância padrão
     this._sp = spfi().using(SPFx(context));
@@ -393,7 +392,7 @@ export class SharePointService {
     }
   }
 
-  public async registrarLog(logUrl: string, nomeArquivo: string, userNome: string, userEmail: string, userId: string): Promise<void> {
+  public async registrarLog(logUrl: string, nomeArquivo: string, userNome: string, userEmail: string, userId: string, ação: string): Promise<void> {
     if (!logUrl) return;
     try {
         const urlObj = new URL(logUrl);
@@ -407,12 +406,39 @@ export class SharePointService {
           Title: userNome,
           Arquivo: nomeArquivo,
           Email: userEmail,
-          IDSharepoint: userId
+          IDSharepoint: userId,
+          A_x00e7__x00e3_o: ação
         });
     } catch (e) {
         console.error("Service: Erro ao registrar log", e);
     }
   }
+
+  public async getFileLogs(logListUrl: string, fileName: string): Promise<any[]> {
+    try {
+        if (!logListUrl) return [];
+
+        const urlObj = new URL(logListUrl);
+        const siteUrl = urlObj.origin; 
+        
+        let listPath = decodeURIComponent(urlObj.pathname);
+        if (listPath.toLowerCase().indexOf('.aspx') > -1) {
+             listPath = listPath.substring(0, listPath.lastIndexOf('/'));
+        }
+
+        const items = await this._sp.web.getList(listPath).items
+            .select("Title", "Email", "Arquivo", "A_x00e7__x00e3_o", "Created", "Author/Title") // Ação geralmente vira A_x00e7__x00e3_o
+            .expand("Author")
+            .filter(`Arquivo eq '${fileName}'`)
+            .orderBy("Created", false)(); // false = Decrescente (mais recente primeiro)
+
+        return items;
+
+    } catch (e) {
+        console.error("Erro ao buscar logs:", e);
+        return [];
+    }
+}
 
   // --- Upload e Verificação ---
 
@@ -612,6 +638,38 @@ private async ensureFolderAndGetTarget(listTitle: string, folderUrl: string): Pr
   }
 }
 
+public async isMemberOfGroup(targetGroupId: string): Promise<boolean> {
+  try {
+    const client = await this._context.msGraphClientFactory.getClient('3');
+    
+    // Pega todos os grupos que o usuário faz parte (direta ou indiretamente)
+    const response = await client.api('/me/transitiveMemberOf')
+      .select('id,displayName') 
+      .get();
+
+    const groups = response.value;
+    
+    // --- DEBUG: ISSO VAI SALVAR SUA VIDA ---
+    console.log("--------------------------------------------------");
+    console.log("🔍 GRUPOS ENCONTRADOS PARA O USUÁRIO:");
+    groups.forEach((g: any) => console.log(`Nome: [${g.displayName}] | ID: [${g.id}]`));
+    console.log("--------------------------------------------------");
+    console.log(`Buscando por ID: ${targetGroupId}`);
+
+    // Verifica match
+    const match = groups.some((g: any) => g.id === targetGroupId);
+    
+    if (match) console.log("✅ Usuário é membro (Admin)!");
+    else console.log("❌ Usuário NÃO é membro ou ID não bate.");
+
+    return match;
+
+  } catch (error) {
+    console.error("Erro API Graph (Verifique se aprovou no Admin Center):", error);
+    return false;
+  }
+}
+
   public async getFileVersions(fileUrl: string): Promise<any[]> {
      return await this._sp.web.getFileByServerRelativePath(fileUrl).versions();
   }
@@ -621,13 +679,27 @@ private async ensureFolderAndGetTarget(listTitle: string, folderUrl: string): Pr
   }
 
   // --- Edição ---
-  public async getFileMetadata(fileUrl: string): Promise<any> {
+public async getFileMetadata(fileUrl: string): Promise<any> {
     try {
-        const item = await this._sp.web.getFileByServerRelativePath(fileUrl).getItem();
-        // Expande campos de lookup e pessoa (Author/Editor/Responsavel)
-        return await item.select("*", "Author/Title", "Editor/Title", "Responsavel/Title", "Responsavel/Id", "Responsavel/EMail").expand("Author", "Editor", "Responsavel")();
-    } catch (e) {
-        console.error("Erro ao buscar metadados:", e);
+        const file = this._sp.web.getFileByServerRelativePath(fileUrl);
+        const item = await file.getItem();
+
+        const data = await item
+            .select(
+                "*", 
+                "FileLeafRef", 
+                "FileDirRef",  
+                "Author/Title", 
+                "Editor/Title", 
+                "Respons_x00e1_vel/Title", "Respons_x00e1_vel/EMail", "Respons_x00e1_vel/Id" 
+            )
+            .expand("Author", "Editor", "Respons_x00e1_vel")();
+
+        console.log("🔍 Metadados (via Item):", data);
+        return data;
+
+    } catch (error) {
+        console.error("Erro ao obter metadados do arquivo:", error);
         return null;
     }
 }

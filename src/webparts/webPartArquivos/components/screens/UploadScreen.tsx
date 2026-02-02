@@ -228,11 +228,11 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
       // 4. Log
       const user = props.webPartProps.context.pageContext.user;
       const userId = String(props.webPartProps.context.pageContext.legacyPageContext.userId || '0');
-      await props.spService.registrarLog(props.webPartProps.listaLogURL, nomeFinalExt, user.displayName, user.email, userId);
+      const ação = "Upload de arquivo";
+      await props.spService.registrarLog(props.webPartProps.listaLogURL, nomeFinalExt, user.displayName, user.email, userId, ação);
 
       props.onStatus("", false, MessageBarType.success);
         setShowSplash(true); 
-
         setFileToUpload([]);
         setNomeBaseEditavel('');
         setSufixoFixo('');
