@@ -26,7 +26,6 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
   const [nomeBaseEditavel, setNomeBaseEditavel] = React.useState('');
   const [sufixoFixo, setSufixoFixo] = React.useState('');
   const [descricao, setDescricao] = React.useState('');
-  const [assunto, setAssunto] = React.useState('');
   const [nomesubpasta, setNomesubpasta] = React.useState('');
   const [checked, setChecked] = React.useState(false);
   const [subpastasOptions, setSubpastasOptions] = React.useState<IDropdownOption[]>([]);
@@ -154,7 +153,7 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
 };
 
   const fazerUpload = async () => {
-    if (fileToUpload.length === 0 || !selectedCliente || !nomeBaseEditavel || !assunto) {
+    if (fileToUpload.length === 0 || !selectedCliente || !nomeBaseEditavel || !nomesubpasta || !descricao) {
       props.onStatus("Preencha todos os campos obrigatórios.", false, MessageBarType.error);
       return;
     }
@@ -167,7 +166,6 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
       let nomeFinalExt: string;
       const nomeCompleto = `${sufixoFixo}${nomeBaseEditavel}`;
       let idRealDoSharePoint: number | null = null;
-      let assuntoFinal = assunto;
       let caminhoDestino = selectedCliente.trim();
 
       if(nomesubpasta && nomesubpasta.trim().length > 0) {
@@ -209,7 +207,6 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
       const metadados: any = {
       FileHash: hash,
       DescricaoDocumento: descricao,
-      Assunto: assuntoFinal,
       CiclodeVida: checked ? "Ativo" : "Inativo"
     };
 
@@ -240,7 +237,6 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
         setNomeBaseEditavel('');
         setSufixoFixo('');
         setDescricao('');
-        setAssunto('');
         setNomesubpasta('');
         setSelectedResponsavel([]);
 
@@ -362,12 +358,13 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
             onChange={(e: any, option: any, index: any, value: any) => {
               setNomesubpasta(option ? (option.text as string) : (value || ''));
             }}
+            required
             disabled={!selectedCliente || loadingSubpastas}
             onRenderLowerContent={() => 
               loadingSubpastas ? <Spinner size={SpinnerSize.xSmall} label="Buscando pastas..." labelPosition="right" /> : null
             }
           />
-          <Field label="Responsável" required>
+          <Field label="Responsável">
             <NormalPeoplePicker
               onResolveSuggestions={onFilterPeople}
               onEmptyResolveSuggestions={() => onFilterPeople("")}
@@ -391,15 +388,15 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
              onChange={(e, v) => setDescricao(v || '')}
           />
 
-          <label>Ciclo de Vida</label>
+          <Field label="Ciclo de Vida">
           <Switch
             style={{ maxWidth: "400px" }}
             checked={checked}
             onChange={onChange}
             label={checked ? "Ativo" : "Inativo"}
             required
-            aria-describedby='Ao marcar como ativo a pasta terá prazo'
           />
+          </Field>
 
           <Stack horizontal horizontalAlign="end" style={{ marginTop: 10 }}>
              <PrimaryButton 
