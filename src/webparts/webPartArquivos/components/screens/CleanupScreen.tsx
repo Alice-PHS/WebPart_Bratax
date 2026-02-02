@@ -74,11 +74,12 @@ export const CleanupScreen: React.FunctionComponent<ICleanupProps> = (props) => 
 
   return (
     <div className={styles.containerCard}>
+        <div className={styles.header}>
       <Stack horizontal verticalAlign="center" className={styles.header}>
          <IconButton iconProps={{ iconName: 'Back' }} onClick={props.onBack} />
          <h2 className={styles.title}>Otimizar Espaço</h2>
       </Stack>
-
+        </div>
       <Stack tokens={{childrenGap: 20}} style={{marginTop: 20}}>
           <Dropdown 
              label="Selecione a Pasta"

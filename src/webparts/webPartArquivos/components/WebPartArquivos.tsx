@@ -6,15 +6,19 @@ import { UploadScreen } from './screens/UploadScreen';
 import { ViewerScreen } from './screens/ViewerScreen';
 import { CleanupScreen } from './screens/CleanupScreen';
 import { ClientsScreen } from './screens/ClientsScreen';
-import { MessageBar, MessageBarType, Icon } from '@fluentui/react';
+import { MessageBar, MessageBarType, Icon, Modal, Dropdown, Stack, DefaultButton, PrimaryButton, TextField } from '@fluentui/react';
 import styles from "./WebPartArquivos.module.scss";
 import { Screen } from '../models/IAppState';
+import { FileExplorerScreen } from './screens/FileExplorerScreen';
 
 interface IMainState {
   currentScreen: Screen;
   statusMessage: string;
   isLoading: boolean;
   messageType: MessageBarType;
+  isAdvancedSearchOpen: boolean;
+  advSearchText: string;         
+  searchMode: string;
 }
 
 export default class WebPartArquivos extends React.Component<IWebPartArquivosProps, IMainState> {
@@ -27,9 +31,35 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
       currentScreen: 'HOME',
       statusMessage: '',
       isLoading: false,
-      messageType: MessageBarType.info
+      messageType: MessageBarType.info,
+      isAdvancedSearchOpen: false,
+      advSearchText: '',
+      searchMode: 'Frase Exata'
     };
   }
+
+  private _handleAdvancedSearchLaunch = () => {
+  const { advSearchText, searchMode } = this.state;
+  if (!advSearchText) return;
+
+  try {
+    const urlObj = new URL(this.props.arquivosLocal);
+    let path = decodeURIComponent(urlObj.pathname);
+    if (path.toLowerCase().indexOf('.aspx') > -1) path = path.substring(0, path.lastIndexOf('/'));
+    if (path.toLowerCase().indexOf('/forms/') > -1) path = path.substring(0, path.toLowerCase().indexOf('/forms/'));
+    if (path.endsWith('/')) path = path.slice(0, -1);
+    
+    const cleanPath = `${urlObj.origin}${path}`;
+    const displayTerm = searchMode === "Frase Exata" ? `"${advSearchText}"` : advSearchText;
+    const queryFinal = `${displayTerm} Path:"${cleanPath}*" IsDocument:True`;
+    const searchResultsUrl = `${urlObj.origin}/_layouts/15/search.aspx?q=${encodeURIComponent(queryFinal)}`;
+
+    window.open(searchResultsUrl, '_blank');
+    this.setState({ isAdvancedSearchOpen: false, advSearchText: '' });
+  } catch (e) {
+    console.error("Erro ao abrir pesquisa:", e);
+  }
+};
 
   private _handleStatus = (msg: string, isLoading: boolean, type: MessageBarType = MessageBarType.info) => {
     this.setState({ statusMessage: msg, isLoading, messageType: type });
@@ -42,6 +72,7 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
   public render(): React.ReactElement<IWebPartArquivosProps> {
     const { currentScreen, statusMessage, messageType } = this.state;
     const userEmail = this.props.context.pageContext.user.email || "usuario@empresa.com";
+    const userName = this.props.context.pageContext.user.displayName || "Usuário";
     const userInitial = userEmail.substring(0, 2).toUpperCase();
 
     // Títulos da tela superior baseados na seleção
@@ -50,10 +81,69 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
     if (currentScreen === 'VIEWER') pageTitle = "Meus Documentos";
     if (currentScreen === 'CLEANUP') pageTitle = "Manutenção e Limpeza";
     if (currentScreen === 'CLIENTS') pageTitle = "Cadastro de Clientes";
+    if (currentScreen === 'EXPLORER') pageTitle = "Explorador Geral";
 
     return (
       <div className={styles.webPartArquivos}>
         <div className={styles.dashboardContainer}>
+
+                {/* --- MODAL DE PESQUISA AVANÇADA GLOBAL --- */}
+      <Modal
+        isOpen={this.state.isAdvancedSearchOpen}
+        onDismiss={() => this.setState({ isAdvancedSearchOpen: false })}
+        isBlocking={false}
+        styles={{ main: { maxWidth: 600, borderRadius: 30, overflow: 'hidden' } }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: 'white' }}>
+          <div style={{ backgroundColor: '#0078d4', width: '100%', textAlign: 'center', padding: '30px 0' }}>
+            <Icon iconName="Search" style={{ fontSize: 35, color: 'white' }} />
+          </div>
+
+          <div style={{ padding: '20px 40px', width: '100%', boxSizing: 'border-box' }}>
+            <h2 style={{ textAlign: 'center', fontFamily: 'Segoe UI', fontWeight: 600 }}>Pesquisa Avançada</h2>
+
+            <Stack horizontal tokens={{ childrenGap: 10 }} style={{ marginTop: 20 }}>
+              <TextField 
+                placeholder="Digite o termo para busca..." 
+                value={this.state.advSearchText}
+                onChange={(e, v) => this.setState({ advSearchText: v || '' })}
+                styles={{ root: { flexGrow: 1 } }}
+                onKeyDown={(e) => { if (e.key === 'Enter') this._handleAdvancedSearchLaunch(); }}
+              />
+              <Dropdown
+                options={[
+                  { key: 'Frase Exata', text: 'Frase Exata' },
+                  { key: 'Todas as Palavras', text: 'Todas as Palavras' }
+                ]}
+                selectedKey={this.state.searchMode}
+                onChange={(e, o) => this.setState({ searchMode: o?.key as string })}
+                styles={{ root: { width: 160 } }}
+              />
+            </Stack>
+
+            <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 10 }} style={{ marginTop: 20 }}>
+              <Icon iconName="Info" style={{ color: '#0078d4', fontSize: 20 }} />
+              <span style={{ fontSize: 12, color: '#666' }}>
+                A busca será realizada em uma nova janela dentro do diretório do SharePoint.
+              </span>
+            </Stack>
+
+            <Stack horizontal horizontalAlign="center" tokens={{ childrenGap: 15 }} style={{ marginTop: 30, marginBottom: 10 }}>
+              <DefaultButton 
+                text="Cancelar" 
+                onClick={() => this.setState({ isAdvancedSearchOpen: false })}
+                styles={{ root: { borderRadius: 20, height: 40, width: 120 } }}
+              />
+              <PrimaryButton 
+                text="Confirmar" 
+                disabled={!this.state.advSearchText}
+                onClick={this._handleAdvancedSearchLaunch}
+                styles={{ root: { borderRadius: 20, height: 40, width: 120, backgroundColor: '#0078d4', border: 'none' } }}
+              />
+            </Stack>
+          </div>
+        </div>
+      </Modal>
           
           {/* --- SIDEBAR FIXA --- */}
           <aside className={styles.sidebarContainer}>
@@ -68,6 +158,10 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
               <button className={`${styles.navItem} ${currentScreen === 'HOME' ? styles.active : ''}`} onClick={() => this._navigate('HOME')}>
                 <Icon iconName="GridViewMedium" /><span>Dashboard</span>
               </button>
+
+              <button className={`${styles.navItem} ${currentScreen === 'UPLOAD' ? styles.active : ''}`} onClick={() => this._navigate('UPLOAD')}>
+                <Icon iconName="CloudUpload" /><span>Novo Upload</span>
+              </button>
               
               <span className={styles.sectionTitle}>BIBLIOTECAS</span>
               
@@ -75,16 +169,19 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
                 <Icon iconName="FabricFolder" /><span>Meus Documentos</span>
               </button>
 
-              <button className={`${styles.navItem} ${currentScreen === 'UPLOAD' ? styles.active : ''}`} onClick={() => this._navigate('UPLOAD')}>
-                <Icon iconName="CloudUpload" /><span>Novo Upload</span>
+              <button className={`${styles.navItem} ${currentScreen === 'EXPLORER' ? styles.active : ''}`} onClick={() => this._navigate('EXPLORER')}>
+                <Icon iconName="DocumentSearch" /><span>Explorador Geral</span>
               </button>
+
+              <button 
+                  className={`${styles.navItem} ${this.state.isAdvancedSearchOpen ? styles.active : ''}`} 
+                  onClick={() => this.setState({ isAdvancedSearchOpen: true })}
+                >
+                  <Icon iconName="Search" /><span>Pesquisa Avançada</span>
+                </button>
 
               {/* SEÇÃO ADMINISTRAÇÃO */}
               <span className={styles.sectionTitle}>ADMINISTRAÇÃO</span>
-              
-              <button className={`${styles.navItem} ${currentScreen === 'CLIENTS' ? styles.active : ''}`} onClick={() => this._navigate('CLIENTS')}>
-                <Icon iconName="AddFriend" /><span>Novo Cliente</span>
-              </button>
 
               <button className={`${styles.navItem} ${currentScreen === 'CLEANUP' ? styles.active : ''}`} onClick={() => this._navigate('CLEANUP')}>
                 <Icon iconName="Broom" /><span>Manutenção</span>
@@ -94,7 +191,7 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
             <div className={styles.userProfile}>
               <div className={styles.avatarCircle}>{userInitial}</div>
               <div className={styles.userInfo}>
-                <strong>Usuário Conectado</strong>
+                <strong>{userName}</strong>
                 <span>{userEmail}</span>
               </div>
             </div>
@@ -123,7 +220,13 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
             {/* Área de Scroll onde as telas são carregadas */}
             <div className={styles.contentScrollable}>
               
-              {currentScreen === 'HOME' && <HomeScreen onNavigate={this._navigate} />}
+              {currentScreen === 'HOME' && (
+                <HomeScreen 
+                    onNavigate={this._navigate} 
+                    spService={this._spService}       
+                    webPartProps={this.props}         
+                />
+            )}
 
               {currentScreen === 'UPLOAD' && (
                 <UploadScreen 
@@ -143,13 +246,14 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
                 />
               )}
 
-              {currentScreen === 'CLIENTS' && (
-                <ClientsScreen
+              {currentScreen === 'EXPLORER' && (
+                <FileExplorerScreen 
                     spService={this._spService}
                     webPartProps={this.props}
+                    onBack={() => this._navigate('HOME')}
                     onStatus={this._handleStatus}
                 />
-              )}
+            )}
 
               {currentScreen === 'CLEANUP' && (
                 <CleanupScreen 

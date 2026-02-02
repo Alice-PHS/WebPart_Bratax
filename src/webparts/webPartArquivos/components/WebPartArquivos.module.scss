@@ -1,126 +1,401 @@
 @import '~@fluentui/react/dist/sass/References.scss';
 
+/* --- CONTAINER GLOBAL E RESET --- */
 .webPartArquivos {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', sans-serif;
   color: #323130;
-  // REMOVIDO: height: 100vh; (Isso causava a barra dupla com o SharePoint)
-  // ALTERADO: Altura fixa calculada ou 100% do pai disponível
-  height: calc(100vh - 50px); // Ajuste fino para descontar cabeçalho do SharePoint se necessário, ou use 100%
-  overflow: hidden; // Impede a rolagem geral da página
-  background: #ffffff;
+  
+  /* Altura total disponível menos o header do SharePoint (aprox 50px) */
+  height: calc(100vh - 50px);
+  min-height: 600px; /* Garante altura mínima em telas pequenas */
+  
+  overflow: hidden; /* Impede rolagem dupla na página */
+  background: #f8fafc; /* Fundo cinza claro base */
   padding: 0;
+  margin: 0;
   box-sizing: border-box;
+  display: flex;
 
-  // Garante que tudo use box-sizing correto para evitar barra horizontal
+  /* Garante box-sizing em tudo */
   * { box-sizing: border-box; }
+}
 
-  // --- Layout Principal ---
-  .dashboardContainer {
+/* --- ESTRUTURA DO DASHBOARD --- */
+.dashboardContainer {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  /* BARRA LATERAL (ESQUERDA) */
+  .sidebarContainer {
+    width: 260px;
+    min-width: 260px; /* Impede encolhimento */
+    background-color: #0f172a; /* Azul Escuro */
+    color: white;
     display: flex;
-    width: 100%;
-    height: 100%; // Ocupa a altura definida no pai
-    overflow: hidden; // Garante que nada vaze aqui
+    flex-direction: column;
+    height: 100%;
+    flex-shrink: 0;
     
-    // BARRA LATERAL (Esquerda)
-    .sidebarContainer {
-      width: 260px;
-      background-color: #0f172a; 
+    /* Rolagem apenas no menu se necessário */
+    overflow-y: hidden;
+    z-index: 10;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.05);
+
+    /* LOGO */
+    .logoArea {
+      padding: 30px 24px;
       display: flex;
-      flex-direction: column;
-      color: white;
-      flex-shrink: 0; // Fixa a largura, não deixa encolher
-      padding: 24px;
-      overflow-y: auto; // Permite rolar só o menu se for muito grande
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
       
-      // ... (estilos internos da sidebar iguais aos anteriores) ...
-      .logoArea {
-        display: flex; align-items: center; gap: 12px; margin-bottom: 40px;
-        .logoIcon { width: 40px; height: 40px; background: #3b82f6; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: white; }
-        .logoText { h2 { margin: 0; font-size: 16px; font-weight: 700; color: #ffffff; } span { font-size: 11px; color: #94a3b8; } }
+      .logoIcon {
+        width: 40px;
+        height: 40px;
+        background: #3b82f6; /* Azul Brilhante */
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        color: white;
       }
 
-      .navMenu {
-        display: flex; flex-direction: column; gap: 8px; flex: 1;
-        .navItem {
-          display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s; color: #94a3b8; font-size: 14px; font-weight: 500; border: none; background: transparent; text-align: left; width: 100%;
-          &:hover { background-color: rgba(255, 255, 255, 0.05); color: #fff; }
-          &.active { background-color: #3b82f6; color: #fff; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
-        }
-        .sectionTitle { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #475569; margin-top: 20px; margin-bottom: 10px; padding-left: 10px; font-weight: 700; }
+      .logoText {
+        h2 { margin: 0; font-size: 16px; font-weight: 700; color: #fff; line-height: 1.2; }
+        span { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
       }
-
-      .userProfile { margin-top: auto; display: flex; align-items: center; gap: 12px; padding-top: 20px; border-top: 1px solid #1e293b; .avatarCircle { width: 36px; height: 36px; background: #6366f1; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; } .userInfo { display: flex; flex-direction: column; strong { font-size: 13px; color: #fff; } span { font-size: 11px; color: #94a3b8; } } }
     }
 
-    // CONTEÚDO PRINCIPAL (Direita)
-    .mainContent {
+    /* MENU */
+    .navMenu {
       flex: 1;
+      padding: 24px 16px;
       display: flex;
       flex-direction: column;
-      background-color: #f8fafc;
-      overflow: hidden; // Segura o conteúdo dentro da área
-      position: relative;
-      min-width: 0; // TRUQUE DE CSS: Impede que o flex item estoure a largura (barra horizontal)
+      gap: 4px;
+      overflow-y: auto;
 
-      .topHeader {
-        height: 60px;
-        background: #ffffff; 
-        border-bottom: 1px solid #e2e8f0; 
-        display: flex; align-items: center; justify-content: space-between; 
-        padding: 0 24px;
-        flex-shrink: 0;
-        h1 { font-size: 18px; font-weight: 600; color: #1e293b; margin: 0; }
+      /* Scrollbar invisível */
+      &::-webkit-scrollbar { width: 0px; background: transparent; }
+
+      .sectionTitle {
+        font-size: 11px;
+        color: #64748b;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin: 24px 12px 8px 12px;
+        letter-spacing: 1px;
       }
 
-      // Área de rolagem APENAS aqui
-      .contentScrollable {
-        padding: 0; 
-        overflow-y: auto; // Barra de rolagem vertical aqui
-        overflow-x: hidden; // Sem barra horizontal
-        height: 100%;
+      .navItem {
+        background: transparent;
+        border: none;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        color: #94a3b8; /* Texto inativo */
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        text-align: left;
+
+        i { font-size: 18px; width: 20px; text-align: center; }
+
+        &:hover {
+          background: rgba(255,255,255,0.05);
+          color: white;
+        }
+
+        &.active {
+          background: #3b82f6; /* Azul Ativo */
+          color: white;
+          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+          font-weight: 600;
+        }
+      }
+    }
+
+    /* USER PROFILE */
+    .userProfile {
+      padding: 20px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(0,0,0,0.2);
+      margin-top: auto;
+
+      .avatarCircle {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: #475569;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 14px;
+        border: 2px solid #1e293b;
+      }
+
+      .userInfo {
         display: flex;
         flex-direction: column;
+        overflow: hidden;
+        strong { font-size: 13px; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        span { font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       }
     }
   }
 
-  // --- Classes de Telas (Upload, Clients, etc) ---
-  
-  .containerCard {
-    width: 100%;
-    padding: 32px; // Padding interno para afastar o conteúdo das bordas da tela
-    max-width: 1400px; // Limite para não ficar esticado demais em monitores 4k
-    margin: 0;
-  }
+  /* CONTEÚDO PRINCIPAL (DIREITA) */
+  .mainContent {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #f8fafc;
+    overflow: hidden;
+    position: relative;
+    min-width: 0; /* Evita estouro de flex */
 
-  // Header interno das telas
-  .header {
-    display: flex; align-items: center; margin-bottom: 20px;
-  }
-  .title { font-size: 16px; font-weight: 600; color: #64748b; margin: 0; }
+    /* Header Superior Fixo */
+    .topHeader {
+      height: 64px;
+      background: #ffffff;
+      border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      flex-shrink: 0;
 
-  // Upload Area
-  .uploadContainer {
-    background-color: #ffffff; border: 2px dashed #e2e8f0; border-radius: 12px; padding: 40px; text-align: center; transition: all 0.2s; margin-bottom: 10px;
-    &:hover { border-color: #3b82f6; background-color: #f0f9ff; }
-  }
-  .fileInput { margin-top: 10px; display: block; margin-left: auto; margin-right: auto; }
-  
-  // Viewer Layout
-  .viewerLayout {
-    display: flex; 
-    height: 600px; // Altura fixa interna
-    border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #fff; margin-top: 10px;
-  }
-  .sidebar { width: 280px; border-right: 1px solid #e2e8f0; background: #f8fafc; overflow-y: auto; }
-  .sidebarItem, .sidebarFile { padding: 10px 16px; cursor: pointer; display: flex; align-items: center; color: #475569; font-size: 14px; &:hover { background-color: #e2e8f0; } }
-  .activeFile { background-color: #eff6ff !important; color: #2563eb !important; font-weight: 600; border-left: 3px solid #2563eb; }
+      h1 { margin: 0; font-size: 18px; font-weight: 600; color: #1e293b; }
+    }
 
-  // Utils
-  .imagePlaceholderContainer { text-align: center; margin-top: 40px; padding: 20px; }
-  .placeholderImg { max-width: 100%; width: 600px; border-radius: 12px; opacity: 0.9; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    /* Área de Scroll do Conteúdo */
+    .contentScrollable {
+      flex: 1;
+      padding: 0; /* Padding interno das telas resolve o espaçamento */
+      overflow-y: auto;
+      overflow-x: hidden;
+      
+      /* Scrollbar Personalizada */
+      &::-webkit-scrollbar { width: 8px; }
+      &::-webkit-scrollbar-track { background: transparent; }
+      &::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      &::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    }
+  }
 }
+
+/* --- HOME SCREEN STYLES --- */
+.homeContainer {
+  padding: 32px;
+  max-width: 1600px;
+  margin: 0 auto; /* Centraliza em telas muito largas */
+}
+
+.topBar {
+  margin-bottom: 30px;
+  h2 { margin: 0; font-size: 24px; font-weight: 700; color: #1e293b; }
+}
+
+.summarySection {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+
+  .summaryCard {
+    flex: 1;
+    min-width: 240px;
+    background: white;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 1px solid #f1f5f9;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    .cardIcon {
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      
+      &.blue { background: #eff6ff; color: #3b82f6; }
+      &.purple { background: #faf5ff; color: #a855f7; }
+      &.yellow { background: #fefce8; color: #eab308; }
+      &.green { background: #f0fdf4; color: #22c55e; }
+    }
+
+    .cardContent {
+      display: flex;
+      flex-direction: column;
+      span { font-size: 14px; color: #64748b; font-weight: 500; margin-bottom: 4px; }
+      strong { font-size: 28px; color: #0f172a; font-weight: 700; line-height: 1; }
+    }
+  }
+}
+
+.mainGrid {
+  display: flex;
+  gap: 24px;
+  
+  .leftColumn { flex: 2; min-width: 0; }
+  .rightColumn { flex: 1; min-width: 300px; display: flex; flex-direction: column; gap: 24px; }
+}
+
+.contentCard {
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border: 1px solid #f1f5f9;
+  
+  h3 { margin: 0 0 20px 0; font-size: 16px; color: #0f172a; font-weight: 700; }
+}
+
+.activityList {
+  .activityItem {
+    display: flex;
+    align-items: center;
+    padding: 16px 0;
+    border-bottom: 1px solid #f1f5f9;
+    &:last-child { border-bottom: none; }
+
+    .activityInfo {
+      margin-left: 16px;
+      flex: 1;
+      p { margin: 0; font-size: 14px; color: #334155; strong { font-weight: 600; color: #0f172a; } }
+      .fileName { font-size: 12px; color: #94a3b8; display: block; margin-top: 4px; }
+    }
+    .activityTime { font-size: 12px; color: #94a3b8; font-weight: 500; }
+  }
+}
+
+.clientUsageItem {
+  margin-bottom: 20px;
+  .usageHeader { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 8px; }
+}
+
+.tipCard {
+  background: #eff6ff; border: 1px solid #dbeafe;
+  h4 { color: #1e40af; }
+  p { color: #1e3a8a; }
+}
+
+/* --- FILE EXPLORER HEADER (Moderno) --- */
+.header {
+  //padding: 24px 32px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 8px; /* Opcional: cantos arredondados no header */
+}
+
+.headerTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .title { font-size: 24px; font-weight: 700; margin: 0; color: #0f172a; vertical-align: left; }
+  .subtitle { font-size: 14px; color: #64748b; font-weight: 400; }
+}
+
+.headerControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  /* Overrides FluentUI */
+  :global(.ms-TextField-fieldGroup) { height: 40px; border-radius: 8px; border-color: #cbd5e1; }
+  :global(.ms-Button) { height: 40px; border-radius: 8px; }
+}
+
+/* --- COMPONENTS GERAIS --- */
+.containerCard {
+  padding: 32px;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.filterChip {
+  background: #e0f2fe;
+  color: #0284c7;
+  padding: 6px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+  &:hover { background: #bae6fd; }
+}
+
+/* --- UPLOAD AREA --- */
+.uploadContainer {
+  background-color: #ffffff;
+  border: 2px dashed #cbd5e1;
+  border-radius: 16px;
+  padding: 60px;
+  text-align: center;
+  transition: all 0.2s;
+  margin-bottom: 24px;
+  
+  &:hover { border-color: #3b82f6; background-color: #f8fafc; }
+  
+  label { font-size: 16px; color: #475569; }
+}
+
+.fileInput { 
+  margin-top: 20px; 
+  display: block; 
+  margin-left: auto; 
+  margin-right: auto;
+  font-size: 14px;
+}
+
+/* --- VIEWER --- */
+.viewerLayout {
+  display: flex;
+  height: 600px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  margin-top: 20px;
+}
+
+.sidebar { width: 300px; border-right: 1px solid #e2e8f0; background: #f8fafc; overflow-y: auto; }
+.sidebarItem { padding: 12px 20px; cursor: pointer; display: flex; align-items: center; color: #334155; font-size: 14px; font-weight: 500; &:hover { background-color: #e2e8f0; } }
+.sidebarFile { padding: 10px 20px; cursor: pointer; display: flex; align-items: center; color: #475569; font-size: 13px; &:hover { background-color: #f1f5f9; } }
+.activeFile { background-color: #eff6ff !important; color: #2563eb !important; font-weight: 600; border-right: 3px solid #2563eb; }
+
+/* UTILS */
+.imagePlaceholderContainer { text-align: center; margin-top: 60px; }
+.placeholderImg { max-width: 100%; width: 500px; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
 
 /*@import '~@fluentui/react/dist/sass/References.scss';
 

@@ -3,6 +3,7 @@ import { Stack, IconButton, TextField, Spinner, SpinnerSize, PrimaryButton, Icon
 import styles from "../WebPartArquivos.module.scss";
 import { SharePointService } from '../../services/SharePointService';
 import { IFolderNode, IWebPartProps } from '../../models/IAppState';
+import { EditScreen } from './EditScreen';
 
 interface IViewerProps {
   spService: SharePointService;
@@ -19,13 +20,22 @@ export const ViewerScreen: React.FunctionComponent<IViewerProps> = (props) => {
   const [fileVersions, setFileVersions] = React.useState<any[]>([]);
   const [versionsToKeep, setVersionsToKeep] = React.useState(2);
   const [loadingTree, setLoadingTree] = React.useState(false);
+  const [isEditing, setIsEditing] = React.useState(false);
 
-  // Define funções ANTES do useEffect
+  // --- CORREÇÃO: Pegando o e-mail do usuário logado ---
+  const currentUserEmail = props.webPartProps.context.pageContext.user.email.toLowerCase();
+
   const loadRoot = async () => {
     setLoadingTree(true);
     try {
         const { folders, files } = await props.spService.getFolderContents(props.webPartProps.arquivosLocal);
-        // Mapeia para garantir que as propriedades de controle existam
+        
+        // --- FILTRO: Corrigido para acessar propriedades dinâmicas ---
+        const myFiles = files.filter((f: any) => {
+            // Agora o campo AuthorEmail é garantido pelo service
+            return f.AuthorEmail.toLowerCase() === currentUserEmail;
+        });
+
         const mappedFolders = folders.map(f => ({ 
             ...f, 
             Files: [], 
@@ -33,48 +43,57 @@ export const ViewerScreen: React.FunctionComponent<IViewerProps> = (props) => {
             isLoaded: false, 
             isExpanded: false 
         }));
+
         setRootFolders(mappedFolders);
-        setRootFiles(files);
+        setRootFiles(myFiles);
     } catch (e) {
         console.error(e);
-        props.onStatus("Erro ao carregar estrutura. Verifique as configurações da WebPart.", false, MessageBarType.error);
+        props.onStatus("Erro ao carregar estrutura.", false, MessageBarType.error);
     } finally {
         setLoadingTree(false);
     }
   };
 
   const updateFolderState = (targetUrl: string, newData: Partial<IFolderNode>) => {
-      // Função recursiva pura para criar nova árvore com estado atualizado
-      const updateRecursive = (list: IFolderNode[]): IFolderNode[] => {
-          return list.map(item => {
-              // Compara URL decodificada para garantir match
-              if (decodeURIComponent(item.ServerRelativeUrl) === decodeURIComponent(targetUrl)) {
-                  return { ...item, ...newData };
-              } else if (item.Folders && item.Folders.length > 0) {
-                  return { ...item, Folders: updateRecursive(item.Folders) };
-              }
-              return item;
-          });
-      };
-      setRootFolders(prev => updateRecursive(prev));
+    // Função recursiva para navegar na árvore e atualizar apenas a pasta alvo
+    const updateRecursive = (list: IFolderNode[]): IFolderNode[] => {
+      return list.map(item => {
+        // Comparamos as URLs ignorando maiúsculas/minúsculas e decodificando caracteres especiais
+        if (decodeURIComponent(item.ServerRelativeUrl).toLowerCase() === decodeURIComponent(targetUrl).toLowerCase()) {
+          // Retorna a pasta com os novos dados (isLoaded, Files, etc)
+          return { ...item, ...newData };
+        } else if (item.Folders && item.Folders.length > 0) {
+          // Se não for esta pasta, procura recursivamente nas subpastas
+          return { ...item, Folders: updateRecursive(item.Folders) };
+        }
+        return item;
+      });
+    };
+
+    // Atualiza o estado principal disparando a re-renderização
+    setRootFolders(prev => updateRecursive(prev));
   };
 
   const onExpandFolder = async (folder: IFolderNode) => {
-    // 1. Alterna visualmente
     const newExpandedState = !folder.isExpanded;
     updateFolderState(folder.ServerRelativeUrl, { isExpanded: newExpandedState });
 
-    // 2. Se for abrir e ainda não carregou dados, busca no SP
     if (newExpandedState && !folder.isLoaded) {
         try {
             const { folders, files } = await props.spService.getFolderContents(props.webPartProps.arquivosLocal, folder.ServerRelativeUrl);
             
+            // --- FILTRO: Corrigido para subpastas ---
+            const mySubFiles = files.filter((f: any) => {
+                const authorEmail = f.Author?.Email || f.AuthorEmail || "";
+                return authorEmail.toLowerCase() === currentUserEmail;
+            });
+
             const subMapped = folders.map(f => ({ ...f, Files: [], Folders: [], isLoaded: false, isExpanded: false }));
             
             updateFolderState(folder.ServerRelativeUrl, { 
                 isLoaded: true,
                 Folders: subMapped,
-                Files: files
+                Files: mySubFiles
             });
         } catch (e) {
             console.error(e);
@@ -133,16 +152,27 @@ export const ViewerScreen: React.FunctionComponent<IViewerProps> = (props) => {
       // Filtro visual simples (se tiver busca, mostra tudo que der match, senão obedece o expand)
       const hasSearch = searchTerm.length > 0;
       const matchSearch = hasSearch && folder.Name.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      // Se tem busca, ignora o isExpanded e mostra se der match
-      const showChildren = folder.isExpanded || hasSearch; 
+
+      const showChildren = folder.isExpanded || hasSearch;
 
       if (hasSearch && !matchSearch) {
-          // Se tem busca e essa pasta não bate, verifica se filhos batem (logica simplificada: mostra se expandido)
-          // Para uma busca robusta recursiva, seria necessário filtrar a arvore antes.
-          // Aqui vamos apenas ocultar se não der match direto para simplificar
-          // return null; 
+        return null;
       }
+
+      if (isEditing && selectedFileUrl) {
+      return (
+          <EditScreen 
+             fileUrl={selectedFileUrl}
+             spService={props.spService}
+             webPartProps={props.webPartProps}
+             onBack={() => {
+                 setIsEditing(false);
+                 // Opcional: Recarrega as versões/dados ao voltar
+                 void handleSelectFile(selectedFileUrl); 
+             }}
+          />
+      );
+  }
 
       return (
           <div key={folder.ServerRelativeUrl}>
@@ -175,11 +205,13 @@ export const ViewerScreen: React.FunctionComponent<IViewerProps> = (props) => {
   };
 
   return (
-    <div className={styles.containerCard} style={{maxWidth: '1200px'}}>
+    <div className={styles.containerCard}>
+        <div className={styles.header}>
        <Stack horizontal verticalAlign="center" className={styles.header}>
          <IconButton iconProps={{ iconName: 'Back' }} onClick={props.onBack} />
          <h2 className={styles.title}>Visualizador</h2>
        </Stack>
+       </div>
 
        <div className={styles.viewerLayout} style={{ height: '600px', display: 'flex', border: '1px solid #eee' }}>
            {/* Sidebar */}
@@ -210,6 +242,7 @@ export const ViewerScreen: React.FunctionComponent<IViewerProps> = (props) => {
                         <Stack horizontal tokens={{childrenGap: 10}} verticalAlign="center">
                             <TextField type="number" label="Manter:" value={versionsToKeep.toString()} onChange={(e,v) => setVersionsToKeep(parseInt(v||'2'))} styles={{root:{width:60}, fieldGroup:{height:30}}} />
                             <PrimaryButton text="Limpar Antigas" onClick={() => void cleanVersions()} />
+                                <PrimaryButton iconProps={{ iconName: 'Edit' }} text="Editar Detalhes"  onClick={() => setIsEditing(true)} />
                         </Stack>
                      </div>
                      <iframe src={`${selectedFileUrl}?web=1`} width="100%" height="100%" style={{border:'none'}} />

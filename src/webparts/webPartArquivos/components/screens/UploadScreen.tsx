@@ -1,9 +1,15 @@
 import * as React from 'react';
-import { Stack, PrimaryButton, TextField, Dropdown, IDropdownOption, Label, Icon, IconButton, MessageBarType } from '@fluentui/react';
+import { Stack, PrimaryButton, TextField, Dropdown, IDropdownOption, Label, Icon, IconButton, MessageBarType, Spinner, SpinnerSize, ComboBox } from '@fluentui/react';
+import type { JSXElement } from "@fluentui/react-components";
+import { Field, Switch } from "@fluentui/react-components";
 import styles from "../WebPartArquivos.module.scss";
 import { SharePointService } from '../../services/SharePointService';
 import { calculateHash, createZipPackage } from '../../utils/FileUtils';
 import { IWebPartProps } from '../../models/IAppState';
+import { IPersonaProps } from '@fluentui/react/lib/Persona';
+import { NormalPeoplePicker } from '@fluentui/react/lib/Pickers';
+import { set } from '@microsoft/sp-lodash-subset/lib/index';
+
 
 interface IUploadProps {
   spService: SharePointService;
@@ -16,10 +22,41 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
   const [fileToUpload, setFileToUpload] = React.useState<File[]>([]);
   const [clientesOptions, setClientesOptions] = React.useState<IDropdownOption[]>([]);
   const [selectedCliente, setSelectedCliente] = React.useState<string>('');
-  
+  const [selectedResponsavel, setSelectedResponsavel] = React.useState<IPersonaProps[]>([]);
   const [nomeBaseEditavel, setNomeBaseEditavel] = React.useState('');
   const [sufixoFixo, setSufixoFixo] = React.useState('');
   const [descricao, setDescricao] = React.useState('');
+  const [assunto, setAssunto] = React.useState('');
+  const [nomesubpasta, setNomesubpasta] = React.useState('');
+  const [checked, setChecked] = React.useState(false);
+  const [subpastasOptions, setSubpastasOptions] = React.useState<IDropdownOption[]>([]);
+  const [loadingSubpastas, setLoadingSubpastas] = React.useState(false);
+  const [showSplash, setShowSplash] = React.useState(false);
+
+  const onChange = React.useCallback(
+    (ev: React.ChangeEvent<HTMLInputElement>) => {
+      setChecked(ev.currentTarget.checked);
+    },
+    [setChecked]
+  );
+
+  const onFilterPeople = async (filterText: string): Promise<IPersonaProps[]> => {
+  if (filterText.length < 3) return [];
+  
+  try {
+    const results = await props.spService.searchPeople(filterText);
+    return results.map(u => ({
+      // O Search do SharePoint retorna propriedades com nomes diferentes
+      key: u.Key, 
+      text: u.DisplayText,
+      secondaryText: u.EntityData?.Email || u.Description,
+      id: u.EntityData?.SPUserID // Este é o ID que o SharePoint usa para salvar
+    }));
+  } catch (e) {
+    console.error("Erro ao buscar pessoas", e);
+    return [];
+  }
+};
 
   const carregarClientes = async () => {
     if(!props.webPartProps.listaClientesURL) {
@@ -61,7 +98,11 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
   const onFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     const userEmail = props.webPartProps.context.pageContext.user.email;
-    
+    const userName = props.webPartProps.context.pageContext.user.displayName;
+    const Iniciais = (userName.split(' ')[0].charAt(0) + userName.split(' ').pop()!.charAt(0)).toUpperCase();
+    const Ano = new Date().getFullYear();
+    const AnoCurto = Ano.toString().slice(-2);
+
     if (files && files.length > 0) {
       props.onStatus("Calculando histórico...", true, MessageBarType.info);
       const fileList = Array.from(files);
@@ -78,8 +119,8 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
       const nomeBase = fileList.length > 1 
         ? "pacote_documentos" 
         : fileList[0].name.substring(0, fileList[0].name.lastIndexOf('.'));
-      
-      const sufixo = `_${userEmail}_${count}`;
+
+      const sufixo = `${Iniciais}_${count}_${AnoCurto}`;
 
       setFileToUpload(fileList);
       setNomeBaseEditavel(nomeBase);
@@ -88,8 +129,32 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
     }
   };
 
+  const carregarSubpastas = async (cliente: string) => {
+  if (!cliente) {
+    setSubpastasOptions([]);
+    return;
+  }
+
+  setLoadingSubpastas(true);
+  try {
+    // Busca as pastas dentro da pasta do cliente
+    const pastas = await props.spService.getFoldersInFolder(props.webPartProps.arquivosLocal, cliente);
+    
+    const options = pastas.map(p => ({
+      key: p.Name,
+      text: p.Name
+    }));
+
+    setSubpastasOptions(options);
+  } catch (e) {
+    console.error("Erro ao carregar subpastas:", e);
+  } finally {
+    setLoadingSubpastas(false);
+  }
+};
+
   const fazerUpload = async () => {
-    if (fileToUpload.length === 0 || !selectedCliente || !nomeBaseEditavel) {
+    if (fileToUpload.length === 0 || !selectedCliente || !nomeBaseEditavel || !assunto) {
       props.onStatus("Preencha todos os campos obrigatórios.", false, MessageBarType.error);
       return;
     }
@@ -100,7 +165,26 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
       // 1. Preparar Conteúdo
       let conteudoFinal: Blob | File;
       let nomeFinalExt: string;
-      const nomeCompleto = `${nomeBaseEditavel}${sufixoFixo}`;
+      const nomeCompleto = `${sufixoFixo}${nomeBaseEditavel}`;
+      let idRealDoSharePoint: number | null = null;
+      let assuntoFinal = assunto;
+      let caminhoDestino = selectedCliente.trim();
+
+      if(nomesubpasta && nomesubpasta.trim().length > 0) {
+    // Remove caracteres inválidos e garante a estrutura pasta/subpasta
+    const subLimpa = nomesubpasta.replace(/[\\/:*?"<>|]/g, '').trim(); 
+    caminhoDestino = `${caminhoDestino}/${subLimpa}`;
+    caminhoDestino = caminhoDestino.replace(/\/+/g, '/');
+    }
+
+      // Validação do responsável
+      if (selectedResponsavel && selectedResponsavel.length > 0) {
+      const userEmail = selectedResponsavel[0].secondaryText;
+      if (userEmail) {
+        props.onStatus("Validando responsável...", true, MessageBarType.info);
+        idRealDoSharePoint = await props.spService.ensureUser(userEmail);
+      }
+    }
 
       if (fileToUpload.length > 1) {
         props.onStatus("Criando ZIP...", true, MessageBarType.info);
@@ -122,14 +206,26 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
         return;
       }
 
+      const metadados: any = {
+      FileHash: hash,
+      DescricaoDocumento: descricao,
+      Assunto: assuntoFinal,
+      CiclodeVida: checked ? "Ativo" : "Inativo"
+    };
+
+    // Só adiciona o ID do responsável se ele foi selecionado
+    if (idRealDoSharePoint) {
+      metadados.Respons_x00e1_velId = idRealDoSharePoint;
+    }
+
       // 3. Upload e Metadados
       props.onStatus("Enviando para SharePoint...", true, MessageBarType.info);
       await props.spService.uploadFile(
         props.webPartProps.arquivosLocal,
-        selectedCliente,
+        caminhoDestino,
         nomeFinalExt,
         conteudoFinal,
-        { FileHash: hash, DescricaoDocumento: descricao }
+        metadados
       );
 
       // 4. Log
@@ -137,12 +233,21 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
       const userId = String(props.webPartProps.context.pageContext.legacyPageContext.userId || '0');
       await props.spService.registrarLog(props.webPartProps.listaLogURL, nomeFinalExt, user.displayName, user.email, userId);
 
-      props.onStatus("Sucesso! Arquivo enviado.", false, MessageBarType.success);
-      setFileToUpload([]);
-      setNomeBaseEditavel('');
-      setSufixoFixo('');
-      setDescricao('');
-      
+      props.onStatus("", false, MessageBarType.success);
+        setShowSplash(true); 
+
+        setFileToUpload([]);
+        setNomeBaseEditavel('');
+        setSufixoFixo('');
+        setDescricao('');
+        setAssunto('');
+        setNomesubpasta('');
+        setSelectedResponsavel([]);
+
+        setTimeout(() => {
+            setShowSplash(false);
+        }, 3000);
+
     } catch (error: any) {
       console.error(error);
       props.onStatus("Erro no upload: " + (error.message || "Desconhecido"), false, MessageBarType.error);
@@ -204,43 +309,96 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
           </div>
 
           {/* Formulário */}
-          <Dropdown 
-            label="Cliente (Pasta de Destino)"
-            placeholder="Selecione o cliente..."
-            options={clientesOptions}
-            selectedKey={selectedCliente}
-            onChange={(e, o) => setSelectedCliente(o?.key as string)}
-            required
-          />
 
           <TextField 
-             label="Nome do Arquivo"
-             value={nomeBaseEditavel}
-             onChange={(e, v) => setNomeBaseEditavel(v || '')}
-             required
-             description="O sistema gerará automaticamente o versionamento."
-             onRenderSuffix={() => (
-                 <div style={{ 
-                     background: '#f3f2f1', 
-                     padding: '0 10px', 
-                     display: 'flex', 
-                     alignItems: 'center', 
-                     height: '100%', 
-                     fontSize: 12, 
-                     color: '#605e5c',
-                     fontWeight: 600
-                 }}>
-                    {sufixoFixo}
-                 </div>
-             )}
+            label="Nome do arquivo"
+            // Adicionamos a lógica de habilitação aqui
+            disabled={fileToUpload.length === 0} 
+            onRenderPrefix={() => (
+              <div style={{ 
+                background: fileToUpload.length === 0 ? '#f9f9f9' : '#f3f2f1', // Muda a cor se desabilitado
+                padding: '0 10px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                height: '100%', 
+                fontSize: 12, 
+                color: fileToUpload.length === 0 ? '#a19f9d' : '#605e5c',
+                fontWeight: 600
+              }}>
+                {sufixoFixo || "---"}
+              </div>
+            )}
+            value={nomeBaseEditavel}
+            onChange={(e, v) => setNomeBaseEditavel(v || '')}
+            required
+            // Opcional: mudar a descrição para avisar o usuário
+            description={
+              fileToUpload.length === 0 
+                ? "Selecione um arquivo primeiro para editar o nome." 
+                : "O sistema gerará automaticamente o versionamento."
+            }
           />
-          
+
+             <Dropdown 
+              label="Cliente"
+              placeholder="Selecione o cliente..."
+              options={clientesOptions}
+              selectedKey={selectedCliente}
+              onChange={(e, o) => {
+                const cliente = o?.key as string;
+                setSelectedCliente(cliente);
+                void carregarSubpastas(cliente); // Busca as pastas deste cliente
+              }}
+              required
+            />
+
+          <ComboBox
+            label="Assunto"
+            placeholder="Selecione ou digite um novo nome..."
+            allowFreeform={true} // Permite digitar o que quiser
+            autoComplete="on"
+            options={subpastasOptions}
+            text={nomesubpasta} // Vincula ao seu estado atual
+            onChange={(e: any, option: any, index: any, value: any) => {
+              setNomesubpasta(option ? (option.text as string) : (value || ''));
+            }}
+            disabled={!selectedCliente || loadingSubpastas}
+            onRenderLowerContent={() => 
+              loadingSubpastas ? <Spinner size={SpinnerSize.xSmall} label="Buscando pastas..." labelPosition="right" /> : null
+            }
+          />
+          <Field label="Responsável" required>
+            <NormalPeoplePicker
+              onResolveSuggestions={onFilterPeople}
+              onEmptyResolveSuggestions={() => onFilterPeople("")}
+              getTextFromItem={(props: IPersonaProps) => props.text || ''}
+              pickerSuggestionsProps={{
+                suggestionsHeaderText: 'Sugestões',
+                noResultsFoundText: 'Nenhuma pessoa encontrada',
+              }}
+              itemLimit={1} // Limita a 1 pessoa apenas
+              selectedItems={selectedResponsavel}
+              onChange={(items) => setSelectedResponsavel(items || [])}
+            />
+            </Field>
+
           <TextField 
-             label="Descrição / Observações"
+             label="Ementa"
              placeholder="Digite detalhes sobre este documento..."
              multiline rows={3}
              value={descricao}
+             required
              onChange={(e, v) => setDescricao(v || '')}
+          />
+
+          <label>Ciclo de Vida</label>
+          <Switch
+            style={{ maxWidth: "400px" }}
+            checked={checked}
+            onChange={onChange}
+            label={checked ? "Ativo" : "Inativo"}
+            required
+            aria-describedby='Ao marcar como ativo a pasta terá prazo'
           />
 
           <Stack horizontal horizontalAlign="end" style={{ marginTop: 10 }}>
@@ -253,6 +411,39 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
              />
           </Stack>
        </Stack>
+
+       {/* TELA DE SPLASH / SUCESSO */}
+        {showSplash && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+            zIndex: 10000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            animation: 'fadeIn 0.3s ease-in-out'
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <Icon 
+                iconName="Completed" 
+                style={{ fontSize: 80, color: '#107c10', marginBottom: 20 }} 
+              />
+              <h1 style={{ color: '#323130', margin: '0 0 10px 0' }}>Upload Concluído!</h1>
+              <p style={{ color: '#605e5c', fontSize: 16 }}>O arquivo foi enviado e os metadados salvos com sucesso.</p>
+              
+              <PrimaryButton 
+                text="Continuar" 
+                onClick={() => setShowSplash(false)} 
+                style={{ marginTop: 30, borderRadius: 20 }}
+              />
+            </div>
+          </div>
+        )}
     </div>
   );
 };
