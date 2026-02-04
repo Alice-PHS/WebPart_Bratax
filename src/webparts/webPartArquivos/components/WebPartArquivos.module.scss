@@ -310,7 +310,7 @@
   border-bottom: 1px solid #e2e8f0;
   margin-bottom: 24px;
   display: flex;
-  align-items: center;
+  align-items: left;
   justify-content: space-between;
   border-radius: 8px; /* Opcional: cantos arredondados no header */
 }
@@ -326,7 +326,7 @@
 
 .headerControls {
   display: flex;
-  align-items: center;
+  align-items: left;
   gap: 12px;
 
   /* Overrides FluentUI */

@@ -31,6 +31,7 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
   const [subpastasOptions, setSubpastasOptions] = React.useState<IDropdownOption[]>([]);
   const [loadingSubpastas, setLoadingSubpastas] = React.useState(false);
   const [showSplash, setShowSplash] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const onChange = React.useCallback(
     (ev: React.ChangeEvent<HTMLInputElement>) => {
@@ -216,8 +217,7 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
     }
 
       // 3. Upload e Metadados
-      props.onStatus("Enviando para SharePoint...", true, MessageBarType.info);
-      await props.spService.uploadFile(
+      const novoId = await props.spService.uploadFile(
         props.webPartProps.arquivosLocal,
         caminhoDestino,
         nomeFinalExt,
@@ -225,11 +225,19 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
         metadados
       );
 
-      // 4. Log
+      // 2. Passa o ID para o registro de log
       const user = props.webPartProps.context.pageContext.user;
       const userId = String(props.webPartProps.context.pageContext.legacyPageContext.userId || '0');
-      const ação = "Upload de arquivo";
-      await props.spService.registrarLog(props.webPartProps.listaLogURL, nomeFinalExt, user.displayName, user.email, userId, ação);
+
+      await props.spService.registrarLog(
+          props.webPartProps.listaLogURL, 
+          nomeFinalExt, 
+          user.displayName, 
+          user.email, 
+          userId, 
+          "Upload de arquivo",
+          String(novoId)
+      );
 
       props.onStatus("", false, MessageBarType.success);
         setShowSplash(true); 
@@ -269,39 +277,65 @@ export const UploadScreen: React.FunctionComponent<IUploadProps> = (props) => {
        <Stack tokens={{ childrenGap: 20 }}>
           
           {/* Área de Upload Destacada */}
-          <div className={styles.uploadContainer}>
-             <Stack horizontalAlign="center" tokens={{ childrenGap: 10 }}>
-                 <Icon iconName="CloudUpload" style={{ fontSize: 48, color: '#0078d4' }} />
-                 <Label style={{ fontSize: 16, fontWeight: 600, color: '#323130' }}>
-                    Arraste arquivos aqui ou clique para selecionar
-                 </Label>
-                 
-                 <input 
-                    type="file" 
-                    multiple 
-                    onChange={(e) => void onFileSelected(e)} 
-                    className={styles.fileInput} 
-                    title='Selecionar Arquivo' 
-                 />
+          <div className={styles.uploadContainer} style={{ border: '2px dashed #0078d4', borderRadius: 8, padding: 30, backgroundColor: '#f3f9fd', position: 'relative', textAlign: 'center' }}>
+  <Stack horizontalAlign="center" tokens={{ childrenGap: 10 }}>
+      <Icon iconName="CloudUpload" style={{ fontSize: 48, color: '#0078d4' }} />
+      <Label style={{ fontSize: 16, fontWeight: 600, color: '#323130' }}>
+        Arraste arquivos aqui ou clique para selecionar
+      </Label>
+      
+      {/* Input invisível que cobre toda a área */}
+      <input 
+        type="file" 
+        multiple // Importante: Mantive multiple para a tela principal
+        ref={fileInputRef}
+        className={styles.fileInput} 
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+        title='Selecionar Arquivo' 
+        onChange={(e) => void onFileSelected(e)} 
+      />
 
-                 {/* Feedback visual de arquivo selecionado */}
-                 {fileToUpload.length > 0 && (
-                    <div style={{ 
-                        marginTop: 10, 
-                        padding: '8px 16px', 
-                        background: '#e6ffcc', 
-                        borderRadius: 20, 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: 8 
-                    }}>
-                        <Icon iconName="CheckMark" style={{ color: 'green' }} />
-                        <span style={{ color: '#006600', fontWeight: 600 }}>
-                           {fileToUpload.length} arquivo(s) pronto(s) para envio
-                        </span>
-                    </div>
-                 )}
-             </Stack>
+      {/* Feedback visual de arquivos selecionados */}
+                {fileToUpload.length > 0 && (
+                  <div style={{ 
+                      marginTop: 15, 
+                      padding: '10px 20px', 
+                      background: '#e6ffcc', 
+                      border: '1px solid #bcefaa',
+                      borderRadius: 20, 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: 10,
+                      zIndex: 1 // Garante que fique acima do input invisível
+                  }}>
+                      <Icon iconName="CheckMark" style={{ color: 'green', fontSize: 16 }} />
+                      <Stack>
+                          <span style={{ color: '#006600', fontWeight: 600 }}>
+                            {fileToUpload.length} arquivo(s) selecionado(s)
+                          </span>
+                          {/* Mostra o nome do primeiro arquivo como exemplo */}
+                          <span style={{ fontSize: 11, color: '#605e5c' }}>
+                            {fileToUpload[0].name} {fileToUpload.length > 1 ? `e mais ${fileToUpload.length - 1}...` : ''}
+                          </span>
+                      </Stack>
+
+                      {/* Botão para limpar a seleção */}
+                      <IconButton 
+                          iconProps={{ iconName: 'Cancel' }} 
+                          title="Limpar seleção"
+                          styles={{ root: { height: 24, width: 24, marginLeft: 10 } }}
+                          onClick={(e) => {
+                              e.stopPropagation(); 
+                              e.preventDefault();
+                              setFileToUpload([]);
+                              setNomeBaseEditavel('');
+                              setSufixoFixo('');
+                              if (fileInputRef.current) fileInputRef.current.value = '';
+                          }}
+                      />
+                  </div>
+                )}
+            </Stack>
           </div>
 
           {/* Formulário */}

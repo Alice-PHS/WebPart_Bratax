@@ -91,7 +91,6 @@ export class SharePointService {
   // --- Leitura de Dados ---
   
   public async getAllFilesFlat(baseUrl: string): Promise<any[]> {
-    console.log("--- BUSCANDO DADOS VIA RENDER LIST DATA ---");
     try {
         const targetWeb = this.getTargetWeb(baseUrl);
         const relativePath = this.cleanPath(baseUrl);
@@ -131,11 +130,7 @@ export class SharePointService {
 
         // O resultado vem dentro de 'Row'
         const items = data.Row || [];
-        console.log(`Itens retornados (Stream): ${items.length}`);
 
-        if (items.length > 0) {
-            console.log("Exemplo Row[0]:", items[0]);
-        }
 
         return items.map((item: any) => {
             // No RenderListData, FileLeafRef NUNCA falha se for arquivo
@@ -191,8 +186,7 @@ export class SharePointService {
 }
 
   public async getClientes(urlLista: string, campoOrdenacao: string): Promise<any[]> {
-    console.log("--- LENDO CLIENTES ---");
-    
+
     if (!urlLista) return [];
 
     try {
@@ -215,7 +209,6 @@ export class SharePointService {
         if (splitIndex > -1) {
              // Caso Padrão: Conecta no subsite correto (ex: /sites/Docs_atual)
              const siteUrl = urlObj.origin + serverRelativePath.substring(0, splitIndex);
-             console.log("Lendo do Site:", siteUrl);
              targetWeb = Web(siteUrl).using(SPFx(this._context));
         } else {
              // Fallback: Tenta usar a web atual se a URL for estranha
@@ -228,7 +221,6 @@ export class SharePointService {
             .top(500) // Limite de segurança
             .orderBy(campoOrdenacao, true)();
 
-        console.log(`Encontrados ${items.length} clientes.`);
         return items;
 
     } catch (error) {
@@ -264,7 +256,6 @@ export class SharePointService {
     }
 
   public async searchFilesNative(baseUrl: string, queryText: string): Promise<any[]> {
-    console.log("⚡ Iniciando Busca GET (Modo Blindado - Sem SelectProperties)...");
 
     try {
       const cleanUrl = this.getCleanFullUrl(baseUrl);
@@ -274,7 +265,6 @@ export class SharePointService {
 
       // 1. Monta o KQL
       const kql = `${term} AND IsDocument:True AND Path:"${cleanUrl}*"`;
-      console.log("🔍 KQL:", kql);
 
       // 2. A URL SIMPLIFICADA
       // Removi: &selectproperties=...
@@ -282,7 +272,6 @@ export class SharePointService {
       // Mantive apenas o essencial. O SharePoint vai retornar o padrão (que sempre funciona).
       const endpoint = `${this._context.pageContext.web.absoluteUrl}/_api/search/query?querytext='${encodeURIComponent(kql)}'&rowlimit=50`;
       
-      console.log("🌐 URL:", endpoint);
 
       const response: SPHttpClientResponse = await this._context.spHttpClient.get(
         endpoint,
@@ -298,7 +287,6 @@ export class SharePointService {
       const json = await response.json();
       const rawRows = json.PrimaryQueryResult?.RelevantResults?.Table?.Rows || [];
 
-      console.log(`✅ Resultados encontrados: ${rawRows.length}`);
 
       if (rawRows.length === 0) return [];
 
@@ -308,9 +296,6 @@ export class SharePointService {
           if (row.Cells) {
               row.Cells.forEach((cell: any) => { item[cell.Key] = cell.Value; });
           }
-
-          // Debug: Veja no console o que veio de verdade
-          // console.log("Item Padrão:", item);
 
           // Path é garantido vir no padrão
           const fullPath = item.Path || item.OriginalPath || "";
@@ -392,7 +377,7 @@ export class SharePointService {
     }
   }
 
-  public async registrarLog(logUrl: string, nomeArquivo: string, userNome: string, userEmail: string, userId: string, ação: string): Promise<void> {
+  public async registrarLog(logUrl: string, nomeArquivo: string, userNome: string, userEmail: string, userId: string, ação: string, IDArquivo: string): Promise<void> {
     if (!logUrl) return;
     try {
         const urlObj = new URL(logUrl);
@@ -407,35 +392,38 @@ export class SharePointService {
           Arquivo: nomeArquivo,
           Email: userEmail,
           IDSharepoint: userId,
-          A_x00e7__x00e3_o: ação
+          A_x00e7__x00e3_o: ação,
+          IDArquivo: IDArquivo
         });
     } catch (e) {
         console.error("Service: Erro ao registrar log", e);
     }
   }
 
-  public async getFileLogs(logListUrl: string, fileName: string): Promise<any[]> {
+  public async getFileLogs(logListUrl: string, fileId: number): Promise<any[]> {
     try {
-        if (!logListUrl) return [];
+        if (!logListUrl || !fileId) return [];
 
         const urlObj = new URL(logListUrl);
-        const siteUrl = urlObj.origin; 
+        const siteUrl = urlObj.origin + urlObj.pathname.split('/Lists/')[0];
+        const webLog = spfi(siteUrl).using(SPFx(this._context));
         
         let listPath = decodeURIComponent(urlObj.pathname);
         if (listPath.toLowerCase().indexOf('.aspx') > -1) {
              listPath = listPath.substring(0, listPath.lastIndexOf('/'));
         }
 
-        const items = await this._sp.web.getList(listPath).items
-            .select("Title", "Email", "Arquivo", "A_x00e7__x00e3_o", "Created", "Author/Title") // Ação geralmente vira A_x00e7__x00e3_o
+        // ALTERAÇÃO AQUI: Filtramos pelo IDArquivo em vez do nome do arquivo
+        const items = await webLog.web.getList(listPath).items
+            .select("Title", "Email", "Arquivo", "A_x00e7__x00e3_o", "Created", "Author/Title", "IDArquivo")
             .expand("Author")
-            .filter(`Arquivo eq '${fileName}'`)
-            .orderBy("Created", false)(); // false = Decrescente (mais recente primeiro)
+            .filter(`IDArquivo eq '${fileId}'`) // Se a coluna for texto, mantemos as aspas simples
+            .orderBy("Created", false)(); 
 
         return items;
 
     } catch (e) {
-        console.error("Erro ao buscar logs:", e);
+        console.error("Erro ao buscar logs por ID:", e);
         return [];
     }
 }
@@ -511,7 +499,6 @@ export class SharePointService {
             currentFolder = nextFolder;
             
         } catch (e) {
-            console.log(`📂 Pasta '${part}' não existe. Criando...`);
             
             try {
                 // Tenta criar a pasta simples (add) em vez de addUsingPath
@@ -552,49 +539,60 @@ export class SharePointService {
   fileName: string,
   fileContent: Blob | File,
   metadata: any
-): Promise<void> {
+): Promise<number> {
   
-  // --- LIMPEZA AUTOMÁTICA ---
-  let listName = listNameInput;
-  if (listNameInput.indexOf('/') > -1) {
-      const cleanInput = listNameInput.endsWith('/') ? listNameInput.slice(0, -1) : listNameInput;
-      const parts = cleanInput.split('/');
-      listName = decodeURIComponent(parts[parts.length - 1]);
+  try {
+    // 1. Limpeza de URL (Usa a mesma lógica robusta do uploadAnexo)
+    // Isso garante que estamos pegando o caminho relativo correto da biblioteca
+    const relativeListPath = this.cleanPath(listNameInput);
+    
+    console.log(`📂 UploadFile - Alvo: [${relativeListPath}] | Pasta: [${folderPath}]`);
+
+    // 2. Garante que a pasta existe e retorna a referência CORRETA dela
+    const targetFolder = await this.ensureFolderAndGetTarget(relativeListPath, folderPath);
+
+    // 3. Faz o Upload
+    // addUsingPath é ótimo para criar arquivos com nomes complexos
+    await targetFolder.files.addUsingPath(fileName, fileContent, { Overwrite: true });
+
+    // 4. Recupera o Item para editar metadados
+    // AQUI ESTAVA O ERRO: Usamos getByUrl na pasta alvo, que é mais seguro que depender do retorno do add
+    const fileRef = targetFolder.files.getByUrl(fileName);
+    const item = await fileRef.getItem();
+
+    // 5. Atualizar metadados
+    await item.update(metadata);
+
+    // 6. Retornar o ID (para o Log)
+    const itemData = await item.select("Id")();
+    return itemData.Id;
+
+  } catch (error) {
+    console.error("❌ Erro crítico no uploadFile:", error);
+    throw error;
   }
-  
-  console.log(`📂 Alvo: [${listName}] | Pasta: [${folderPath}]`);
-
-  // 1. GARANTE QUE A PASTA EXISTA E JÁ RETORNA A REFERÊNCIA DELA
-  // Vamos mudar o ensureFolder para retornar o objeto da pasta final
-  const targetFolder = await this.ensureFolderAndGetTarget(listName, folderPath);
-
-  // 2. Faz o Upload usando a referência direta (Evita erros de URL/404)
-  await targetFolder.files.addUsingPath(fileName, fileContent, { Overwrite: true });
-
-  // 3. Recuperar o item para metadados
-  // No PnPjs, podemos pegar o item direto do arquivo na pasta
-  const file = targetFolder.files.getByUrl(fileName);
-  const item = await file.getItem();
-
-  // 4. Atualizar metadados
-  await item.update(metadata);
 }
 
-private async ensureFolderAndGetTarget(listTitle: string, folderUrl: string): Promise<any> {
-  const parts = folderUrl.split('/').filter(p => p.trim() !== "");
-  let currentFolder = this._sp.web.lists.getByTitle(listTitle).rootFolder;
+private async ensureFolderAndGetTarget(relativeListPath: string, folderUrl: string): Promise<any> {
+  // Remove a parte da biblioteca do caminho da pasta para evitar criar /sites/site/ dentro da lista
+  const cleanListPath = relativeListPath.toLowerCase();
+  let folderRelativePath = folderUrl.toLowerCase();
+  
+  if (folderRelativePath.indexOf(cleanListPath) > -1) {
+    folderRelativePath = folderUrl.substring(folderUrl.toLowerCase().indexOf(cleanListPath) + cleanListPath.length);
+  }
+
+  const parts = folderRelativePath.split('/').filter(p => p.trim() !== "");
+  let currentFolder = this._sp.web.getList(relativeListPath).rootFolder;
 
   for (const part of parts) {
     try {
-      // Tenta acessar a subpasta
+      // Tenta acessar a pasta
       const nextFolder = currentFolder.folders.getByUrl(part);
-      await nextFolder(); // Valida se existe
+      await nextFolder(); 
       currentFolder = nextFolder;
     } catch (e) {
-      console.log(`📂 Criando subpasta: ${part}`);
-      // Cria se não existir
       await currentFolder.folders.addUsingPath(part);
-      // Atualiza a referência para a pasta recém-criada
       currentFolder = currentFolder.folders.getByUrl(part);
     }
   }
@@ -605,27 +603,36 @@ private async ensureFolderAndGetTarget(listTitle: string, folderUrl: string): Pr
 
   public async getFolderContents(baseUrl: string, folderUrl?: string) {
   try {
-    // 1. Limpeza de URL: Garante que trabalhamos apenas com o Path Relativo
-    // Ex: transforma "https://tenant.sharepoint.com/sites/site/doc" em "/sites/site/doc"
+    // 1. Limpeza de URL
     const urlObj = new URL(baseUrl);
     let relativePath = decodeURIComponent(urlObj.pathname);
 
-    // 2. Se estivermos expandindo uma subpasta, usamos o folderUrl, senão a raiz
+    // 2. Define o alvo
     const targetPath = folderUrl ? decodeURIComponent(folderUrl) : relativePath;
 
     // 3. Obtém a referência da pasta
     const folder = this._sp.web.getFolderByServerRelativePath(targetPath);
 
     // 4. Busca as subpastas e os arquivos
-    // Expandimos o Author para o seu filtro funcionar
     const [folders, files] = await Promise.all([
       folder.folders.select("Name", "ServerRelativeUrl", "ItemCount")(),
+      
       folder.files
         .expand("Author") 
-        .select("Name", "ServerRelativeUrl", "TimeLastModified", "Author/Email", "Author/Id")()
+        // ADICIONADO: MajorVersion, UIVersionLabel e Length
+        .select(
+            "Name", 
+            "ServerRelativeUrl", 
+            "TimeLastModified", 
+            "Author/Email", 
+            "Author/Id",
+            "MajorVersion",   // <--- Necessário para a coluna de Versões
+            "UIVersionLabel", // <--- Alternativa para exibição (ex: "1.0")
+            "Length"          // <--- Necessário para a coluna de Tamanho
+        )()
     ]);
 
-    // Mapeamos para garantir que as propriedades AuthorEmail ou Author.Email existam
+    // Mapeamos para garantir propriedades
     const mappedFiles = files.map((f: any) => ({
       ...f,
       AuthorEmail: f.Author?.Email || "" 
@@ -648,25 +655,43 @@ public async isMemberOfGroup(targetGroupId: string): Promise<boolean> {
       .get();
 
     const groups = response.value;
-    
-    // --- DEBUG: ISSO VAI SALVAR SUA VIDA ---
-    console.log("--------------------------------------------------");
-    console.log("🔍 GRUPOS ENCONTRADOS PARA O USUÁRIO:");
-    groups.forEach((g: any) => console.log(`Nome: [${g.displayName}] | ID: [${g.id}]`));
-    console.log("--------------------------------------------------");
-    console.log(`Buscando por ID: ${targetGroupId}`);
 
     // Verifica match
     const match = groups.some((g: any) => g.id === targetGroupId);
-    
-    if (match) console.log("✅ Usuário é membro (Admin)!");
-    else console.log("❌ Usuário NÃO é membro ou ID não bate.");
 
     return match;
 
   } catch (error) {
     console.error("Erro API Graph (Verifique se aprovou no Admin Center):", error);
     return false;
+  }
+}
+public async getSiteLibraries(): Promise<{ title: string, url: string }[]> {
+  try {
+    // Filtros: 
+    // BaseTemplate eq 101 -> Apenas Bibliotecas de Documentos
+    // Hidden eq false -> Esconde bibliotecas de sistema ocultas
+    const endpoint = `${this._context.pageContext.web.absoluteUrl}/_api/web/lists?$filter=BaseTemplate eq 101 and Hidden eq false&$select=Title,RootFolder/ServerRelativeUrl&$expand=RootFolder`;
+
+    const response: SPHttpClientResponse = await this._context.spHttpClient.get(
+      endpoint,
+      SPHttpClient.configurations.v1
+    );
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.value.map((lib: any) => {
+        return {
+          title: lib.Title,
+          url: lib.RootFolder.ServerRelativeUrl
+        };
+      });
+    } else {
+      throw new Error("Erro ao buscar bibliotecas do site.");
+    }
+  } catch (error) {
+    console.error("Erro em getSiteLibraries:", error);
+    return [];
   }
 }
 
@@ -679,7 +704,7 @@ public async isMemberOfGroup(targetGroupId: string): Promise<boolean> {
   }
 
   // --- Edição ---
-public async getFileMetadata(fileUrl: string): Promise<any> {
+  public async getFileMetadata(fileUrl: string): Promise<any> {
     try {
         const file = this._sp.web.getFileByServerRelativePath(fileUrl);
         const item = await file.getItem();
@@ -695,7 +720,6 @@ public async getFileMetadata(fileUrl: string): Promise<any> {
             )
             .expand("Author", "Editor", "Respons_x00e1_vel")();
 
-        console.log("🔍 Metadados (via Item):", data);
         return data;
 
     } catch (error) {
@@ -704,30 +728,29 @@ public async getFileMetadata(fileUrl: string): Promise<any> {
     }
 }
 
-  // 2. Busca arquivos secundários (onde 'Id documento principal' = ID deste arquivo)
   public async getRelatedFiles(mainFileId: number, libraryUrl: string): Promise<any[]> {
-      try {
-          // Assume que os arquivos secundários estão na mesma biblioteca ou em outra definida
-          const targetWeb = this.getTargetWeb(libraryUrl);
-          const relativePath = this.cleanPath(libraryUrl);
-          
-          // CAML Query ou Filter para pegar arquivos vinculados
-          // Nota: Você precisa garantir que a coluna 'Id_x0020_documento_x0020_principal' existe (nome interno)
-          const items = await targetWeb.getList(relativePath).items
-              .filter(`Id_x0020_documento_x0020_principal eq ${mainFileId} and FSObjType eq 0`)
-              .select("Id", "Title", "FileLeafRef", "FileRef", "Created")();
-              
-          return items.map(i => ({
-              Name: i.FileLeafRef,
-              ServerRelativeUrl: i.FileRef,
-              Id: i.Id,
-              Created: i.Created
-          }));
-      } catch (e) {
-          console.error("Erro ao buscar anexos secundários:", e);
-          return [];
-      }
-  }
+    try {
+        const relativePath = this.cleanPath(libraryUrl);
+        
+        // 1. Adicionamos "Created" (e "Title" se quiser usar o nome amigável)
+        const items = await this._sp.web.getList(relativePath).items
+            .filter(`IDPai eq ${mainFileId}`) 
+            .select("Id", "FileLeafRef", "FileRef", "Created", "Title")(); // <--- Created adicionado
+            
+        // 2. Mapeamos para o formato padrão que a sua UI espera
+        return items.map(i => ({
+            Id: i.Id,
+            Name: i.FileLeafRef, // O nome físico do arquivo (com extensão)
+            Title: i.Title,      // O nome amigável (se tiver)
+            ServerRelativeUrl: i.FileRef,
+            Created: i.Created   // A data agora estará disponível
+        }));
+
+    } catch (e) {
+        console.error("Erro ao buscar anexos:", e);
+        return [];
+    }
+}
 
   // 3. Atualiza o item
   public async updateFileItem(fileUrl: string, updates: any): Promise<void> {
@@ -735,10 +758,55 @@ public async getFileMetadata(fileUrl: string): Promise<any> {
       await item.update(updates);
   }
 
+  // Substitua o método uploadAnexo existente por este:
+
+public async uploadAnexo(
+  libraryUrl: string,
+  folderPath: string,
+  fileName: string,
+  fileContent: Blob | File,
+  metadata: any 
+): Promise<number> { 
+  try {
+    const relativeListPath = this.cleanPath(libraryUrl);
+    
+    // 1. Garante a pasta
+    const targetFolder = await this.ensureFolderAndGetTarget(relativeListPath, folderPath);
+
+    // 2. Upload
+    await targetFolder.files.addUsingPath(fileName, fileContent, { Overwrite: true });
+
+    // 3. Recupera o item (Blindado contra erro undefined)
+    const fileRef = targetFolder.files.getByUrl(fileName);
+    const item = await fileRef.getItem();
+
+    // 4. Atualiza Metadados (IDPai, Hash, Descricao, Responsavel...)
+    await item.update(metadata);
+
+    // 5. Retorna o ID para o Log
+    const itemData = await item.select("Id")();
+    return itemData.Id;
+
+  } catch (error) {
+    console.error("❌ Erro no uploadAnexo:", error);
+    throw error;
+  }
+}
+
+public async deleteFile(fileUrl: string): Promise<void> {
+    try {
+
+        await this._sp.web.getFileByServerRelativePath(fileUrl).recycle();
+        
+    } catch (e) {
+        console.error("Erro ao excluir arquivo:", e);
+        throw new Error("Não foi possível excluir o arquivo.");
+    }
+}
+
   //----------Clientes-----------
 
   public async addCliente(urlLista: string, dados: any): Promise<void> {
-    console.log("--- INICIANDO ADD CLIENTE (Versão Final) ---");
     
     if (!urlLista) throw new Error("URL da lista não configurada.");
 
@@ -754,14 +822,11 @@ public async getFileMetadata(fileUrl: string): Promise<any> {
         serverRelativePath = serverRelativePath.slice(0, -1);
     }
 
-    console.log("Caminho da Lista:", serverRelativePath);
-
     // 2. Descobre a URL do Site Base (tudo antes de /Lists/)
     const splitIndex = serverRelativePath.toLowerCase().indexOf('/lists/');
     if (splitIndex === -1) throw new Error("URL inválida (falta /Lists/).");
 
     const siteUrl = urlObj.origin + serverRelativePath.substring(0, splitIndex);
-    console.log("Conectando no Site:", siteUrl);
 
     try {
         // 3. Conecta no Site Correto
@@ -778,11 +843,223 @@ public async getFileMetadata(fileUrl: string): Promise<any> {
             Emailrespons_x00e1_vel: dados.EmailResponsavel
         });
 
-        console.log("SUCESSO! Item criado.");
-
     } catch (error: any) {
         console.error("ERRO AO SALVAR:", error);
         throw new Error("Erro ao salvar: " + (error.message || "Verifique se os nomes das colunas batem com o SharePoint."));
+    }
+  }
+
+  // --- Permissões ---
+  public async getPermissionLevels(): Promise<any[]> {
+  const url = `${this._context.pageContext.web.absoluteUrl}/_api/web/roledefinitions`;
+  const response = await this._context.spHttpClient.get(url, SPHttpClient.configurations.v1);
+  const data = await response.json();
+  return data.value.filter((role: any) => role.Hidden === false);
+}
+
+public async addPermissionToLibrary(libTitle: string, userEmail: string, roleDefId: string): Promise<void> {
+  const webUrl = this._context.pageContext.web.absoluteUrl;
+  
+  // 1. Pega o ID do usuário no site
+  const userId = await this.ensureUser(userEmail);
+
+  // 2. Quebra a herança da biblioteca para que as permissões sejam únicas nela
+  // copyRoleAssignments=true mantém o que já tinha, false limpa tudo e deixa só o novo
+  const breakUrl = `${webUrl}/_api/web/lists/getbytitle('${libTitle}')/breakroleinheritance(copyRoleAssignments=true, keepSections=false)`;
+  await this._context.spHttpClient.post(breakUrl, SPHttpClient.configurations.v1, {});
+
+  // 3. Adiciona a permissão
+  const addPermUrl = `${webUrl}/_api/web/lists/getbytitle('${libTitle}')/roleassignments/addroleassignment(principalid=${userId}, roledefid=${roleDefId})`;
+  await this._context.spHttpClient.post(addPermUrl, SPHttpClient.configurations.v1, {});
+}
+// Adiciona usuário a um grupo pelo nome do grupo
+  public async addUserToGroup(groupName: string, userEmail: string): Promise<void> {
+    try {
+      const webUrl = this._context.pageContext.web.absoluteUrl;
+      const digest = await this.getFormDigest();
+      
+      // Garante que o usuário existe no site
+      await this.ensureUser(userEmail);
+
+      const endpoint = `${webUrl}/_api/web/sitegroups/getbyname('${encodeURIComponent(groupName)}')/users`;
+
+      // Body simples, apenas o LoginName
+      const body = {
+        'LoginName': `i:0#.f|membership|${userEmail}`
+      };
+
+      const response = await this._context.spHttpClient.post(
+        endpoint,
+        SPHttpClient.configurations.v1,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'Content-type': 'application/json',
+            'X-RequestDigest': digest
+          },
+          body: JSON.stringify(body)
+        }
+      );
+
+      if (!response.ok) {
+         throw new Error(await response.text());
+      }
+
+    } catch (error) {
+      console.error(`Erro ao adicionar usuário ao grupo ${groupName}:`, error);
+      throw error;
+    }
+  }
+
+  // Remove usuário do grupo
+  public async removeUserFromGroup(groupName: string, userEmail: string): Promise<void> {
+    try {
+      const webUrl = this._context.pageContext.web.absoluteUrl;
+      const userId = await this.ensureUser(userEmail);
+
+      // Endpoint para remover: /users/removebyid(id)
+      const endpoint = `${webUrl}/_api/web/sitegroups/getbyname('${groupName}')/users/removebyid(${userId})`;
+
+      await this._context.spHttpClient.post(
+        endpoint,
+        SPHttpClient.configurations.v1,
+        {
+           headers: {
+            'Accept': 'application/json;odata=nometadata',
+            'X-RequestDigest': await this.getFormDigest()
+          }
+        }
+      );
+    } catch (error) {
+      console.error(`Erro ao remover do grupo ${groupName}:`, error);
+      throw error;
+    }
+  }
+
+  // *NOTA: Se você ainda não tem esse método auxiliar para o Token de segurança (Digest), adicione-o:
+  private async getFormDigest(): Promise<string> {
+      const response = await this._context.spHttpClient.post(
+          `${this._context.pageContext.web.absoluteUrl}/_api/contextinfo`,
+          SPHttpClient.configurations.v1,
+          {}
+      );
+      const json = await response.json();
+      return json.FormDigestValue || json.d.GetContextWebInformation.FormDigestValue;
+  }
+  public async ensureSharePointGroup(groupName: string): Promise<number> {
+    const webUrl = this._context.pageContext.web.absoluteUrl;
+    
+    try {
+      // 1. Tenta buscar o grupo
+      const response = await this._context.spHttpClient.get(
+        `${webUrl}/_api/web/sitegroups/getbyname('${encodeURIComponent(groupName)}')`,
+        SPHttpClient.configurations.v1
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.Id;
+      }
+
+      // 2. Se não existe (404), cria com JSON Padrão
+      console.log(`Grupo ${groupName} não existe. Criando...`);
+      const digest = await this.getFormDigest();
+      
+      const createResponse = await this._context.spHttpClient.post(
+        `${webUrl}/_api/web/sitegroups`,
+        SPHttpClient.configurations.v1,
+        {
+          headers: {
+            'Accept': 'application/json',       // Padrão moderno
+            'Content-type': 'application/json', // Padrão moderno
+            'X-RequestDigest': digest
+          },
+          // Body limpo, sem __metadata complexo
+          body: JSON.stringify({
+            'Title': groupName,
+            'Description': 'Grupo criado via SmartGED'
+          })
+        }
+      );
+
+      if (createResponse.ok) {
+        const createData = await createResponse.json();
+        // No JSON padrão, o ID vem direto na raiz
+        const newId = createData.Id; 
+        console.log(`Grupo criado com sucesso. ID: ${newId}`);
+        return newId;
+      } else {
+        const errText = await createResponse.text();
+        throw new Error(`Erro SharePoint (Status ${createResponse.status}): ${errText}`);
+      }
+
+    } catch (e) {
+      console.error("Erro em ensureSharePointGroup:", e);
+      throw e;
+    }
+  }
+
+  // --- Garante que o grupo tenha a permissão correta na Biblioteca ---
+  public async ensureLibraryPermissions(libTitle: string, groupId: number, roleType: 'RO' | 'RW'): Promise<void> {
+    if (!groupId) {
+       throw new Error("ID do Grupo inválido. Não é possível aplicar permissão.");
+    }
+
+    const webUrl = this._context.pageContext.web.absoluteUrl;
+    const digest = await this.getFormDigest();
+
+    // 1073741826 = Leitura, 1073741827 = Edição
+    const roleDefId = roleType === 'RO' ? 1073741826 : 1073741827;
+
+    // --- CORREÇÃO AQUI: Removemos o keepSections=false ---
+    // Apenas copyRoleAssignments=true é suficiente e mais compatível
+    const breakUrl = `${webUrl}/_api/web/lists/getbytitle('${libTitle}')/breakroleinheritance(copyRoleAssignments=true)`;
+
+    try {
+      // 1. Quebra herança
+      await this._context.spHttpClient.post(
+        breakUrl,
+        SPHttpClient.configurations.v1,
+        { 
+            headers: { 
+                'Accept': 'application/json',
+                'Content-type': 'application/json',
+                'X-RequestDigest': digest 
+            },
+            body: JSON.stringify({}) 
+        }
+      );
+    } catch (e) {
+      // Se der erro, assumimos que já está quebrada ou houve um aviso não fatal
+      console.warn("Aviso na quebra de herança (pode já ser única):", e);
+    }
+
+    try {
+      // 2. Adiciona o Grupo
+      const addUrl = `${webUrl}/_api/web/lists/getbytitle('${libTitle}')/roleassignments/addroleassignment(principalid=${groupId}, roledefid=${roleDefId})`;
+      
+      const addRes = await this._context.spHttpClient.post(
+        addUrl,
+        SPHttpClient.configurations.v1,
+        { 
+            headers: { 
+                'Accept': 'application/json',
+                'Content-type': 'application/json',
+                'X-RequestDigest': digest 
+            },
+            body: JSON.stringify({}) 
+        }
+      );
+
+      if (!addRes.ok) {
+          throw new Error(await addRes.text());
+      }
+      
+      console.log(`Permissão ${roleType} aplicada com sucesso na lib ${libTitle}.`);
+
+    } catch (e) {
+      console.error(`Erro ao adicionar permissão (Grupo: ${groupId}):`, e);
+      throw new Error("Falha ao vincular permissão na biblioteca.");
     }
   }
 }

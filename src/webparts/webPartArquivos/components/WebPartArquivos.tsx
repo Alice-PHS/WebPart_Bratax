@@ -6,6 +6,7 @@ import { UploadScreen } from './screens/UploadScreen';
 import { ViewerScreen } from './screens/ViewerScreen';
 import { CleanupScreen } from './screens/CleanupScreen';
 import { ClientsScreen } from './screens/ClientsScreen';
+import { PermissionsScreen } from './screens/PermissionsScreen'; 
 import { MessageBar, MessageBarType, Icon, Modal, Dropdown, Stack, DefaultButton, PrimaryButton, TextField } from '@fluentui/react';
 import styles from "./WebPartArquivos.module.scss";
 import { Screen } from '../models/IAppState';
@@ -19,10 +20,17 @@ interface IMainState {
   isAdvancedSearchOpen: boolean;
   advSearchText: string;         
   searchMode: string;
+  isAdmin: boolean;
+  libraries: { title: string, url: string }[];
+  isLoadingLibraries: boolean;
+  selectedLibUrl: string;
 }
 
 export default class WebPartArquivos extends React.Component<IWebPartArquivosProps, IMainState> {
   private _spService: SharePointService;
+  
+  // ID do grupo de Admin (O mesmo que usamos no ViewerScreen)
+  private readonly ADMIN_GROUP_ID = "34cd74c4-bff0-49f3-aac3-e69e9c5e73f0";
 
   constructor(props: IWebPartArquivosProps) {
     super(props);
@@ -34,32 +42,72 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
       messageType: MessageBarType.info,
       isAdvancedSearchOpen: false,
       advSearchText: '',
-      searchMode: 'Frase Exata'
+      searchMode: 'Frase Exata',
+      isAdmin: false,
+      libraries: [],
+      isLoadingLibraries: true,
+      selectedLibUrl: this.props.arquivosLocal
     };
   }
 
-  private _handleAdvancedSearchLaunch = () => {
-  const { advSearchText, searchMode } = this.state;
-  if (!advSearchText) return;
+  public async componentDidMount() {
+    await Promise.all([
+        this._checkAdminAccess(),
+        this._loadUserLibraries()
+    ]);
+}
 
-  try {
-    const urlObj = new URL(this.props.arquivosLocal);
-    let path = decodeURIComponent(urlObj.pathname);
-    if (path.toLowerCase().indexOf('.aspx') > -1) path = path.substring(0, path.lastIndexOf('/'));
-    if (path.toLowerCase().indexOf('/forms/') > -1) path = path.substring(0, path.toLowerCase().indexOf('/forms/'));
-    if (path.endsWith('/')) path = path.slice(0, -1);
-    
-    const cleanPath = `${urlObj.origin}${path}`;
-    const displayTerm = searchMode === "Frase Exata" ? `"${advSearchText}"` : advSearchText;
-    const queryFinal = `${displayTerm} Path:"${cleanPath}*" IsDocument:True`;
-    const searchResultsUrl = `${urlObj.origin}/_layouts/15/search.aspx?q=${encodeURIComponent(queryFinal)}`;
-
-    window.open(searchResultsUrl, '_blank');
-    this.setState({ isAdvancedSearchOpen: false, advSearchText: '' });
-  } catch (e) {
-    console.error("Erro ao abrir pesquisa:", e);
+  // --- Verifica se o usuário é Admin ---
+  private _checkAdminAccess = async () => {
+      try {
+          const isMember = await this._spService.isMemberOfGroup(this.ADMIN_GROUP_ID);
+          this.setState({ isAdmin: isMember });
+      } catch (error) {
+          console.error("Erro ao verificar permissão de admin:", error);
+          this.setState({ isAdmin: false });
+      }
   }
-};
+
+  // --- carrega as bibliotecas todas ---
+  private _loadUserLibraries = async () => {
+  this.setState({ isLoadingLibraries: true });
+  try {
+    // Filtramos por BaseTemplate 101 (Document Library) e que não sejam ocultas
+    const libs = await this._spService.getSiteLibraries(); 
+    
+    // Opcional: Filtrar bibliotecas "de sistema" que você não quer exibir
+    const excludedTitles = ['Form Templates', 'Style Library', 'Site Assets', 'Arquivos Compartilhados', 'Ativos do Site', 'Biblioteca de Estilos', 'Documentos', 'Modelos de Formulário'];
+    const filteredLibs = libs.filter(l => excludedTitles.indexOf(l.title) === -1);
+
+    this.setState({ libraries: filteredLibs, isLoadingLibraries: false });
+  } catch (error) {
+    console.error("Erro ao carregar bibliotecas:", error);
+    this.setState({ isLoadingLibraries: false });
+  }
+}
+
+  private _handleAdvancedSearchLaunch = () => {
+    const { advSearchText, searchMode } = this.state;
+    if (!advSearchText) return;
+
+    try {
+      const urlObj = new URL(this.props.arquivosLocal);
+      let path = decodeURIComponent(urlObj.pathname);
+      if (path.toLowerCase().indexOf('.aspx') > -1) path = path.substring(0, path.lastIndexOf('/'));
+      if (path.toLowerCase().indexOf('/forms/') > -1) path = path.substring(0, path.toLowerCase().indexOf('/forms/'));
+      if (path.endsWith('/')) path = path.slice(0, -1);
+      
+      const cleanPath = `${urlObj.origin}${path}`;
+      const displayTerm = searchMode === "Frase Exata" ? `"${advSearchText}"` : advSearchText;
+      const queryFinal = `${displayTerm} Path:"${cleanPath}*" IsDocument:True`;
+      const searchResultsUrl = `${urlObj.origin}/_layouts/15/search.aspx?q=${encodeURIComponent(queryFinal)}`;
+
+      window.open(searchResultsUrl, '_blank');
+      this.setState({ isAdvancedSearchOpen: false, advSearchText: '' });
+    } catch (e) {
+      console.error("Erro ao abrir pesquisa:", e);
+    }
+  };
 
   private _handleStatus = (msg: string, isLoading: boolean, type: MessageBarType = MessageBarType.info) => {
     this.setState({ statusMessage: msg, isLoading, messageType: type });
@@ -70,7 +118,7 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
   };
 
   public render(): React.ReactElement<IWebPartArquivosProps> {
-    const { currentScreen, statusMessage, messageType } = this.state;
+    const { currentScreen, statusMessage, messageType, isAdmin } = this.state;
     const userEmail = this.props.context.pageContext.user.email || "usuario@empresa.com";
     const userName = this.props.context.pageContext.user.displayName || "Usuário";
     const userInitial = userEmail.substring(0, 2).toUpperCase();
@@ -78,72 +126,84 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
     // Títulos da tela superior baseados na seleção
     let pageTitle = "Dashboard";
     if (currentScreen === 'UPLOAD') pageTitle = "Novo Upload";
-    if (currentScreen === 'VIEWER') pageTitle = "Meus Documentos";
+    if (currentScreen === 'VIEWER' && (
+        <ViewerScreen 
+          spService={this._spService}
+          webPartProps={{
+            ...this.props,
+            // Sobrescrevemos a URL estática pela que foi clicada na sidebar
+            arquivosLocal: this.state.selectedLibUrl 
+          }}
+          onBack={() => this._navigate('HOME')}
+          onStatus={this._handleStatus}
+        />
+    )) pageTitle = "Meus Documentos";
     if (currentScreen === 'CLEANUP') pageTitle = "Manutenção e Limpeza";
     if (currentScreen === 'CLIENTS') pageTitle = "Cadastro de Clientes";
     if (currentScreen === 'EXPLORER') pageTitle = "Explorador Geral";
+    if (currentScreen === 'PERMISSIONS') pageTitle = "Permissões";
 
     return (
       <div className={styles.webPartArquivos}>
         <div className={styles.dashboardContainer}>
 
-                {/* --- MODAL DE PESQUISA AVANÇADA GLOBAL --- */}
-      <Modal
-        isOpen={this.state.isAdvancedSearchOpen}
-        onDismiss={() => this.setState({ isAdvancedSearchOpen: false })}
-        isBlocking={false}
-        styles={{ main: { maxWidth: 600, borderRadius: 30, overflow: 'hidden' } }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: 'white' }}>
-          <div style={{ backgroundColor: '#0078d4', width: '100%', textAlign: 'center', padding: '30px 0' }}>
-            <Icon iconName="Search" style={{ fontSize: 35, color: 'white' }} />
-          </div>
+              {/* --- MODAL DE PESQUISA AVANÇADA GLOBAL --- */}
+              <Modal
+                isOpen={this.state.isAdvancedSearchOpen}
+                onDismiss={() => this.setState({ isAdvancedSearchOpen: false })}
+                isBlocking={false}
+                styles={{ main: { maxWidth: 600, borderRadius: 30, overflow: 'hidden' } }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: 'white' }}>
+                  <div style={{ backgroundColor: '#0078d4', width: '100%', textAlign: 'center', padding: '30px 0' }}>
+                    <Icon iconName="Search" style={{ fontSize: 35, color: 'white' }} />
+                  </div>
 
-          <div style={{ padding: '20px 40px', width: '100%', boxSizing: 'border-box' }}>
-            <h2 style={{ textAlign: 'center', fontFamily: 'Segoe UI', fontWeight: 600 }}>Pesquisa Avançada</h2>
+                  <div style={{ padding: '20px 40px', width: '100%', boxSizing: 'border-box' }}>
+                    <h2 style={{ textAlign: 'center', fontFamily: 'Segoe UI', fontWeight: 600 }}>Pesquisa Avançada</h2>
 
-            <Stack horizontal tokens={{ childrenGap: 10 }} style={{ marginTop: 20 }}>
-              <TextField 
-                placeholder="Digite o termo para busca..." 
-                value={this.state.advSearchText}
-                onChange={(e, v) => this.setState({ advSearchText: v || '' })}
-                styles={{ root: { flexGrow: 1 } }}
-                onKeyDown={(e) => { if (e.key === 'Enter') this._handleAdvancedSearchLaunch(); }}
-              />
-              <Dropdown
-                options={[
-                  { key: 'Frase Exata', text: 'Frase Exata' },
-                  { key: 'Todas as Palavras', text: 'Todas as Palavras' }
-                ]}
-                selectedKey={this.state.searchMode}
-                onChange={(e, o) => this.setState({ searchMode: o?.key as string })}
-                styles={{ root: { width: 160 } }}
-              />
-            </Stack>
+                    <Stack horizontal tokens={{ childrenGap: 10 }} style={{ marginTop: 20 }}>
+                      <TextField 
+                        placeholder="Digite o termo para busca..." 
+                        value={this.state.advSearchText}
+                        onChange={(e, v) => this.setState({ advSearchText: v || '' })}
+                        styles={{ root: { flexGrow: 1 } }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') this._handleAdvancedSearchLaunch(); }}
+                      />
+                      <Dropdown
+                        options={[
+                          { key: 'Frase Exata', text: 'Frase Exata' },
+                          { key: 'Todas as Palavras', text: 'Todas as Palavras' }
+                        ]}
+                        selectedKey={this.state.searchMode}
+                        onChange={(e, o) => this.setState({ searchMode: o?.key as string })}
+                        styles={{ root: { width: 160 } }}
+                      />
+                    </Stack>
 
-            <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 10 }} style={{ marginTop: 20 }}>
-              <Icon iconName="Info" style={{ color: '#0078d4', fontSize: 20 }} />
-              <span style={{ fontSize: 12, color: '#666' }}>
-                A busca será realizada em uma nova janela dentro do diretório do SharePoint.
-              </span>
-            </Stack>
+                    <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 10 }} style={{ marginTop: 20 }}>
+                      <Icon iconName="Info" style={{ color: '#0078d4', fontSize: 20 }} />
+                      <span style={{ fontSize: 12, color: '#666' }}>
+                        A busca será realizada em uma nova janela dentro do diretório do SharePoint.
+                      </span>
+                    </Stack>
 
-            <Stack horizontal horizontalAlign="center" tokens={{ childrenGap: 15 }} style={{ marginTop: 30, marginBottom: 10 }}>
-              <DefaultButton 
-                text="Cancelar" 
-                onClick={() => this.setState({ isAdvancedSearchOpen: false })}
-                styles={{ root: { borderRadius: 20, height: 40, width: 120 } }}
-              />
-              <PrimaryButton 
-                text="Confirmar" 
-                disabled={!this.state.advSearchText}
-                onClick={this._handleAdvancedSearchLaunch}
-                styles={{ root: { borderRadius: 20, height: 40, width: 120, backgroundColor: '#0078d4', border: 'none' } }}
-              />
-            </Stack>
-          </div>
-        </div>
-      </Modal>
+                    <Stack horizontal horizontalAlign="center" tokens={{ childrenGap: 15 }} style={{ marginTop: 30, marginBottom: 10 }}>
+                      <DefaultButton 
+                        text="Cancelar" 
+                        onClick={() => this.setState({ isAdvancedSearchOpen: false })}
+                        styles={{ root: { borderRadius: 20, height: 40, width: 120 } }}
+                      />
+                      <PrimaryButton 
+                        text="Confirmar" 
+                        disabled={!this.state.advSearchText}
+                        onClick={this._handleAdvancedSearchLaunch}
+                        styles={{ root: { borderRadius: 20, height: 40, width: 120, backgroundColor: '#0078d4', border: 'none' } }}
+                      />
+                    </Stack>
+                  </div>
+                </div>
+              </Modal>
           
           {/* --- SIDEBAR FIXA --- */}
           <aside className={styles.sidebarContainer}>
@@ -180,12 +240,40 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
                   <Icon iconName="Search" /><span>Pesquisa Avançada</span>
                 </button>
 
-              {/* SEÇÃO ADMINISTRAÇÃO */}
-              <span className={styles.sectionTitle}>ADMINISTRAÇÃO</span>
+                {this.state.libraries.map(lib => (
+                <button 
+                  key={lib.url}
+                  className={styles.navItem} 
+                  onClick={() => {
+                    // Monta a URL completa do site + a URL relativa da biblioteca
+                    const siteUrl = this.props.context.pageContext.web.absoluteUrl.replace(this.props.context.pageContext.web.serverRelativeUrl, "");
+                    const fullLibUrl = `${siteUrl}${lib.url}`;
+                    
+                    // Abre em uma nova aba
+                    window.open(fullLibUrl, '_blank');
+                    
+                    console.log("Abrindo biblioteca externa:", lib.title);
+                  }}
+                >
+                  <Icon iconName="NavigateExternalInline" />
+                  <span>{lib.title}</span>
+                </button>
+              ))}
 
-              <button className={`${styles.navItem} ${currentScreen === 'CLEANUP' ? styles.active : ''}`} onClick={() => this._navigate('CLEANUP')}>
-                <Icon iconName="Broom" /><span>Manutenção</span>
-              </button>
+              {/* SEÇÃO ADMINISTRAÇÃO (SÓ APARECE SE FOR ADMIN) */}
+              {isAdmin && (
+                <>
+                  <span className={styles.sectionTitle}>ADMINISTRAÇÃO</span>
+
+                  <button className={`${styles.navItem} ${currentScreen === 'CLEANUP' ? styles.active : ''}`} onClick={() => this._navigate('CLEANUP')}>
+                    <Icon iconName="Broom" /><span>Manutenção</span>
+                  </button>
+                  <button className={`${styles.navItem} ${currentScreen === 'PERMISSIONS' ? styles.active : ''}`} onClick={() => this._navigate('PERMISSIONS')}>
+                    <Icon iconName="Permissions" /><span>Permissões</span>
+                  </button>
+                </>
+              )}
+
             </nav>
 
             <div className={styles.userProfile}>
@@ -257,6 +345,14 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
 
               {currentScreen === 'CLEANUP' && (
                 <CleanupScreen 
+                  spService={this._spService}
+                  webPartProps={this.props}
+                  onBack={() => this._navigate('HOME')}
+                  onStatus={this._handleStatus}
+                />
+              )}
+              {currentScreen === 'PERMISSIONS' && (
+                <PermissionsScreen 
                   spService={this._spService}
                   webPartProps={this.props}
                   onBack={() => this._navigate('HOME')}

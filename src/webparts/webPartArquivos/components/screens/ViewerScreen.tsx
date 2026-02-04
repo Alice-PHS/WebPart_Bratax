@@ -24,7 +24,6 @@ export const ViewerScreen: React.FunctionComponent<IViewerProps> = (props) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [isAdmin, setIsAdmin] = React.useState(false);
   
-  // --- NOVOS ESTADOS (PAINEL DE DETALHES) ---
   const [showInfo, setShowInfo] = React.useState(false); // Controla visibilidade da 3ª coluna
   const [metadata, setMetadata] = React.useState<any>(null); // Guarda os dados para leitura
   const [loadingMeta, setLoadingMeta] = React.useState(false);
@@ -228,10 +227,23 @@ export const ViewerScreen: React.FunctionComponent<IViewerProps> = (props) => {
   return (
     <div className={styles.containerCard}>
         <div className={styles.header}>
-           <Stack horizontal verticalAlign="center" className={styles.header}>
-             <IconButton iconProps={{ iconName: 'Back' }} onClick={props.onBack} />
-             <h2 className={styles.title}>Visualizador {isAdmin ? '(Admin)' : ''}</h2>
-           </Stack>
+            <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 15 }}>
+                <IconButton 
+                    iconProps={{ iconName: 'Back' }} 
+                    onClick={props.onBack} 
+                    styles={{ root: { height: 40, width: 40 }, icon: { fontSize: 20 } }}
+                />
+                    <div className={styles.headerTitleBlock}>
+                    <h2 className={styles.title}>Visualizador {isAdmin ? '(Admin)' : ''}</h2>
+                </div>
+            </Stack>
+            {/* arrumar a posição do botão */}
+                <IconButton
+                    iconProps={{ iconName: 'Sync' }} 
+                    title="Recarregar pastas"
+                    onClick={() => void initViewer()} // Chama a função que carrega a árvore
+                    disabled={loadingTree}
+                />
         </div>
 
         <div className={styles.viewerLayout} style={{ height: '600px', display: 'flex', border: '1px solid #eee' }}>
@@ -261,9 +273,19 @@ export const ViewerScreen: React.FunctionComponent<IViewerProps> = (props) => {
                       <div style={{ padding: 10, background: '#fff', borderBottom: '1px solid #ccc', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                         <span><strong>Versões:</strong> {fileVersions.length}</span>
                         <Stack horizontal tokens={{childrenGap: 10}} verticalAlign="center">
-                            <TextField type="number" label="Manter:" value={versionsToKeep.toString()} onChange={(e,v) => setVersionsToKeep(parseInt(v||'2'))} styles={{root:{width:60}, fieldGroup:{height:30}}} />
-                            <PrimaryButton text="Limpar" onClick={() => void cleanVersions()} />
-                            
+                            {/* Botões de Admin (Só aparecem se isAdmin for true) */}
+                                {isAdmin && (
+                                <>
+                                    <TextField 
+                                    type="number" 
+                                    label="Manter:" 
+                                    value={versionsToKeep.toString()} 
+                                    onChange={(e,v) => setVersionsToKeep(parseInt(v||'2'))} 
+                                    styles={{root:{width:60}, fieldGroup:{height:30}}} 
+                                    />
+                                    <PrimaryButton text="Limpar" onClick={() => void cleanVersions()} />
+                                </>
+                                )}
                             {/* Botão de Editar */}
                             <PrimaryButton iconProps={{ iconName: 'Edit' }} text="Editar" onClick={() => setIsEditing(true)} />
                             

@@ -71,7 +71,7 @@ export const LogTable: React.FunctionComponent<ILogTableProps> = ({ logs }) => {
 
     return {
       file: { 
-        label: log.Arquivo || "Arquivo", 
+        label: log.Arquivo || "Título", 
         icon: <DocumentRegular /> 
       },
       author: { 
@@ -115,7 +115,7 @@ export const LogTable: React.FunctionComponent<ILogTableProps> = ({ logs }) => {
                 <TableHeaderCell {...headerSortProps("action")}>Ação</TableHeaderCell>
                 <TableHeaderCell {...headerSortProps("author")}>Usuário</TableHeaderCell>
                 <TableHeaderCell {...headerSortProps("date")}>Data</TableHeaderCell>
-                <TableHeaderCell {...headerSortProps("file")}>Arquivo</TableHeaderCell>
+                <TableHeaderCell {...headerSortProps("file")}>Título</TableHeaderCell>
                 </TableRow>
             </TableHeader>
             <TableBody>
