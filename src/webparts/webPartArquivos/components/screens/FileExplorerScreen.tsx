@@ -506,7 +506,7 @@ export const FileExplorerScreen: React.FunctionComponent<{
                 value={advSearchText}
                 onChange={(e, v) => setAdvSearchText(v || '')}
                 styles={{ root: { flexGrow: 1 } }}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAdvancedSearchLaunch(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleAdvancedSearchLaunch(); }}
               />
               <Dropdown
                 options={[ { key: 'Frase Exata', text: 'Frase Exata' }, { key: 'Todas as Palavras', text: 'Todas as Palavras' } ]}

@@ -358,7 +358,7 @@ export class SharePointService {
   }*/
 
 
-/*funciona interno*/
+/*funciona interno
     public async searchFilesNative(baseUrl: string, queryText: string): Promise<any[]> {
     try {
       // 1. Limpeza da URL
@@ -451,6 +451,148 @@ export class SharePointService {
               key: `search-${index}`
           };
       });
+
+    } catch (e) {
+      console.error("❌ Erro Geral:", e);
+      return [];
+    }
+  }*/
+
+    public async searchFilesNative(baseUrl: string, queryText: string): Promise<any[]> {
+    try {
+      // 1. Limpeza da URL Base
+      let cleanUrl = this.getCleanFullUrl(baseUrl);
+      cleanUrl = decodeURIComponent(cleanUrl);
+      if (cleanUrl.startsWith('http:')) cleanUrl = cleanUrl.replace('http:', 'https:');
+      if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+
+      // 2. Prepara termo
+      let term = queryText.trim();
+      if (term.indexOf('"') === -1) {
+          if (term.indexOf(' ') === -1 && !term.endsWith('*')) {
+              term = `${term}*`;
+          }
+      }
+
+      // 3. Monta KQL
+      const kql = `${term} AND Path:"${cleanUrl}*"`;
+      
+      // --- PASSO 1: BUSCA INTELIGENTE ---
+      // Pedimos: Path (para o link), HitHighlightedSummary (para o resumo) 
+      // E O MAIS IMPORTANTE: ListId e ListItemId (para buscar os dados sem erro de URL)
+      const searchEndpoint = `${this._context.pageContext.web.absoluteUrl}/_api/search/query?querytext='${encodeURIComponent(kql)}'&selectproperties='Path,HitHighlightedSummary,ListId,ListItemId'&clienttype='ContentSearchRegular'&rowlimit=20&trimduplicates=false`;
+
+      console.log(`🔍 Passo 1 - Identificando Arquivos: [${kql}]`);
+
+      const response = await this._context.spHttpClient.get(
+        searchEndpoint,
+        SPHttpClient.configurations.v1
+      );
+
+      if (!response.ok) {
+          console.error(`❌ Erro Busca:`, await response.text());
+          return [];
+      }
+
+      const json = await response.json();
+      const rawRows = json.PrimaryQueryResult?.RelevantResults?.Table?.Rows || [];
+
+      if (rawRows.length === 0) {
+          console.warn(`🔍 0 arquivos encontrados.`);
+          return [];
+      }
+
+      console.log(`✅ ${rawRows.length} arquivos encontrados. Buscando metadados via ID...`);
+
+      // --- PASSO 2: BUSCA PELO ID (INFALÍVEL) ---
+      
+      const promises = rawRows.map(async (row: any, index: number) => {
+          // Extrai dados da busca
+          const itemSearch: any = {};
+          if (row.Cells) {
+              row.Cells.forEach((cell: any) => { itemSearch[cell.Key] = cell.Value; });
+          }
+
+          // URL e Nome
+          const fullPath = itemSearch.Path || "";
+          let serverRelativeUrl = "";
+          let fileName = "Arquivo";
+          try {
+              const urlObj = new URL(fullPath);
+              serverRelativeUrl = decodeURIComponent(urlObj.pathname);
+              const parts = serverRelativeUrl.split('/');
+              fileName = parts[parts.length - 1];
+          } catch { return null; }
+
+          // Resumo do Texto (Conteúdo encontrado)
+          let searchSummary = "";
+          if (itemSearch.HitHighlightedSummary) {
+              // Remove tags XML feias
+              searchSummary = itemSearch.HitHighlightedSummary.replace(/<[^>]*>/g, ""); 
+              if (searchSummary.length > 50) searchSummary = searchSummary.substring(0, 50) + "...";
+          }
+
+          // IDs para buscar os dados reais
+          const listId = itemSearch.ListId;
+          const itemId = itemSearch.ListItemId;
+
+          // Se tivermos os IDs, usamos a API de Lista (Zero erro de caractere especial)
+          if (listId && itemId) {
+              try {
+                  // URL Mágica: Busca na lista X o item Y. Funciona com qualquer nome de arquivo.
+                  const itemApi = `${this._context.pageContext.web.absoluteUrl}/_api/web/lists(guid'${listId}')/items(${itemId})?$select=Created,Modified,Author/Title,Editor/Title&$expand=Author,Editor`;
+                  
+                  const itemResp = await this._context.spHttpClient.get(itemApi, SPHttpClient.configurations.v1);
+                  
+                  if (itemResp.ok) {
+                      const realData = await itemResp.json();
+                      
+                      // SUCESSO!
+                      return {
+                          Name: fileName,
+                          Title: fileName,
+                          Extension: fileName.split('.').pop() ? `.${fileName.split('.').pop()}` : '',
+                          ServerRelativeUrl: serverRelativeUrl,
+                          
+                          // DATA DE CRIAÇÃO REAL
+                          Created: realData.Created, 
+                          Modified: realData.Modified,
+                          
+                          // AUTOR REAL (Nome da Pessoa)
+                          // Coloquei o resumo do texto entre parênteses para você saber onde achou
+                          Editor: realData.Author?.Title || "Desconhecido",
+                          
+                          // Se quiser ver o trecho do texto na tela, descomente abaixo:
+                          // Editor: `${realData.Author?.Title} (Encontrado: "${searchSummary}")`,
+
+                          Author: { Title: realData.Author?.Title || "Sistema" },
+                          
+                          Id: index,
+                          key: `search-${index}`
+                      };
+                  }
+              } catch (err) {
+                  console.log(`⚠️ Erro ao buscar item ${itemId}:`, err);
+              }
+          }
+
+          // Fallback (Só acontece se falhar a busca por ID)
+          return {
+              Name: fileName,
+              Title: fileName,
+              Extension: fileName.split('.').pop() ? `.${fileName.split('.').pop()}` : '',
+              ServerRelativeUrl: serverRelativeUrl,
+              Created: new Date().toISOString(),
+              Modified: new Date().toISOString(),
+              Editor: "Erro ao ler detalhes",
+              Author: { Title: "Sistema" },
+              Id: index,
+              key: `search-${index}`
+          };
+      });
+
+      const results = await Promise.all(promises);
+      return results.filter(r => r !== null);
 
     } catch (e) {
       console.error("❌ Erro Geral:", e);

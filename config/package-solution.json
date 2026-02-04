@@ -3,7 +3,7 @@
   "solution": {
     "name": "web-part-arquivos-client-side-solution",
     "id": "9ea81c5a-b2b8-42ed-b2da-d66b068e26f2",
-    "version": "2.0.8.6",
+    "version": "2.1.0.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "isDomainIsolated": false,
