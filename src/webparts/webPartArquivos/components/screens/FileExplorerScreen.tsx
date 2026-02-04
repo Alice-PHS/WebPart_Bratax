@@ -3,6 +3,534 @@ import {
   Stack, IconButton, TextField, DetailsList, DetailsListLayoutMode, 
   SelectionMode, IColumn, Spinner, SpinnerSize, MessageBarType, Icon,
   PrimaryButton, DefaultButton, Panel, PanelType, Dropdown, IDropdownOption , Modal, 
+  Separator
+} from '@fluentui/react';
+import styles from "../WebPartArquivos.module.scss";
+import { SharePointService } from '../../services/SharePointService';
+import { IWebPartProps } from '../../models/IAppState';
+import { EditScreen } from './EditScreen';
+
+// Interface auxiliar para o nosso item de arquivo enriquecido
+interface IFileItem {
+    [key: string]: any;
+    _Client: string; // Pasta nível 1 (Cliente)
+    _Subject: string; // Pasta nível 2 (Assunto)
+    Editor: string;   // Nome do Autor/Editor
+}
+
+export const FileExplorerScreen: React.FunctionComponent<{
+  spService: SharePointService;
+  webPartProps: IWebPartProps;
+  onBack: () => void;
+  onStatus: (msg: string, loading: boolean, type: MessageBarType) => void;
+}> = (props) => {
+  const [allItems, setAllItems] = React.useState<IFileItem[]>([]); 
+  const [searchResults, setSearchResults] = React.useState<IFileItem[] | null>(null); // Tipagem ajustada
+  const [filteredItems, setFilteredItems] = React.useState<IFileItem[]>([]); 
+  
+  const [loading, setLoading] = React.useState(true);
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = React.useState(false);
+  
+  // --- NOVOS ESTADOS DE OPÇÕES ---
+  const [extOptions, setExtOptions] = React.useState<IDropdownOption[]>([]);
+  const [clientOptions, setClientOptions] = React.useState<IDropdownOption[]>([]);
+  const [subjectOptions, setSubjectOptions] = React.useState<IDropdownOption[]>([]);
+  const [authorOptions, setAuthorOptions] = React.useState<IDropdownOption[]>([]);
+
+  // --- NOVOS FILTROS SELECIONADOS ---
+  const [selExt, setSelExt] = React.useState<string | undefined>(undefined);
+  const [selClient, setSelClient] = React.useState<string | undefined>(undefined);
+  const [selSubject, setSelSubject] = React.useState<string | undefined>(undefined);
+  const [selAuthor, setSelAuthor] = React.useState<string | undefined>(undefined);
+
+  const [search, setSearch] = React.useState('');
+  
+  // Tela de edição
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [editingFileUrl, setEditingFileUrl] = React.useState<string | null>(null);
+
+  const handleEdit = (fileUrl: string) => {
+      setEditingFileUrl(fileUrl);
+      setIsEditing(true);
+  };
+
+  // --- 1. FUNÇÕES AUXILIARES DE PATH (Refatorada para reutilização) ---
+  const getPathInfo = (serverRelativeUrl: string, libraryUrl: string) => {
+      try {
+          // Normaliza URL da biblioteca
+          const libUrlObj = new URL(libraryUrl.indexOf('http') === 0 ? libraryUrl : `https://dummy${libraryUrl}`);
+          const libPath = decodeURIComponent(libUrlObj.pathname).toLowerCase();
+          
+          const filePath = decodeURIComponent(serverRelativeUrl).toLowerCase();
+
+          // Remove a parte da biblioteca do caminho do arquivo
+          if (filePath.indexOf(libPath) > -1) {
+              let relativePart = filePath.replace(libPath, '');
+              if (relativePart.startsWith('/')) relativePart = relativePart.substring(1);
+              
+              const parts = relativePart.split('/');
+              
+              // Remove o nome do arquivo (última parte)
+              parts.pop();
+
+              // Nível 1: Cliente
+              const client = parts.length > 0 ? parts[0] : "Raiz";
+              
+              // Nível 2: Assunto (se houver)
+              const subject = parts.length > 1 ? parts[1] : "Geral";
+
+              // Formata para Capitalize
+              const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+              return { client: capitalize(client), subject: capitalize(subject) };
+          }
+      } catch (e) {
+          console.error("Erro parser path", e);
+      }
+      return { client: "Outros", subject: "Outros" };
+  };
+
+  // --- 2. FUNÇÃO DE ENRIQUECIMENTO DE DADOS ---
+  // Transforma o dado bruto (API ou Search) no formato que a tabela precisa
+  const enrichData = (rawFiles: any[]): IFileItem[] => {
+      return rawFiles.map((f: any) => {
+          const { client, subject } = getPathInfo(f.ServerRelativeUrl, props.webPartProps.arquivosLocal);
+          
+          // Lógica robusta para extrair nome do Editor/Autor
+          let editorName = "Sistema";
+          
+          if (f.Editor) {
+             // Caso 1: Veio da Search API (String simples ex: "João Silva")
+             if (typeof f.Editor === 'string') {
+                 // Às vezes vem lixo do OWSUSER (ex: "email|João"), pegamos o final
+                 if (f.Editor.indexOf('|') > -1) {
+                    editorName = f.Editor.split('|').pop()?.trim() || f.Editor;
+                 } else {
+                    editorName = f.Editor;
+                 }
+             }
+             // Caso 2: Veio do getAllFilesFlat (Array de objetos do SharePoint)
+             else if (Array.isArray(f.Editor) && f.Editor[0]) {
+                 editorName = f.Editor[0].title || f.Editor[0].Title;
+             }
+             // Caso 3: Objeto único
+             else if (f.Editor.title || f.Editor.Title) {
+                 editorName = f.Editor.title || f.Editor.Title;
+             }
+          }
+
+          return {
+              ...f,
+              _Client: client,
+              _Subject: subject,
+              Editor: editorName // Agora é sempre uma string limpa
+          };
+      });
+  };
+
+  const columns: IColumn[] = [
+  {
+    key: 'colExt',
+    name: 'Tipo',
+    fieldName: 'Extension',
+    minWidth: 40,
+    maxWidth: 40,
+    onRender: (item) => {
+      const ext = item.Extension ? item.Extension.replace('.', '') : '';
+      let iconName = "Page";
+      if (ext === 'pdf') iconName = "PDF";
+      if (ext === 'zip') iconName = "ZipFolder";
+      if (ext === 'png' || ext === 'jpg') iconName = "Photo2";
+      if (ext === 'doc' || ext === 'docx') iconName = "WordDocument";
+      if (ext === 'xls' || ext === 'xlsx') iconName = "ExcelDocument";
+      
+      return <Icon iconName={iconName} style={{ fontSize: 18, color: '#605e5c' }} />;
+    }
+  },
+  {
+    key: 'colName',
+    name: 'Título do Arquivo',
+    fieldName: 'Name',
+    minWidth: 200,
+    isResizable: true,
+    onRender: (item) => (
+      <span 
+        style={{ color: '#0078d4', cursor: 'pointer', fontWeight: 600 }}
+        onClick={() => window.open(`${item.ServerRelativeUrl}?web=1`, '_blank')}
+      >
+        {item.Name}
+      </span>
+    )
+  },
+  {
+    key: 'colClient',
+    name: 'Cliente',
+    fieldName: '_Client', 
+    minWidth: 100,
+    isResizable: true
+  },
+  {
+    key: 'colSubject',
+    name: 'Assunto',
+    fieldName: '_Subject', 
+    minWidth: 120,
+    isResizable: true
+  },
+  {
+    key: 'colAuthor',
+    name: 'Autor',
+    fieldName: 'Editor',
+    minWidth: 120,
+    isResizable: true
+  },
+  {
+    key: 'colDate',
+    name: 'Data',
+    fieldName: 'Created',
+    minWidth: 100,
+    onRender: (item) => <span>{new Date(item.Created).toLocaleDateString('pt-BR')}</span>
+  },
+  {
+    key: 'colAction',
+    name: 'Editar',
+    minWidth: 50,
+    onRender: (item) => (
+            <IconButton 
+                iconProps={{ iconName: 'Edit' }} 
+                title="Editar Detalhes"
+                onClick={() => handleEdit(item.ServerRelativeUrl)} 
+                styles={{root: {color: '#0078d4'}}}
+            />
+        )
+    }
+  ];
+
+  const loadInitialData = async () => {
+    setLoading(true);
+    try {
+      const files = await props.spService.getAllFilesFlat(props.webPartProps.arquivosLocal);
+
+      // Usamos a função de enriquecimento
+      const enrichedFiles = enrichData(files);
+
+      setAllItems(enrichedFiles); 
+      setSearchResults(null); // Reseta busca ao recarregar
+      
+      // 1. Dropdown Extensões
+      const uniqueExts = Array.from(new Set(enrichedFiles.map(f => f.Extension))).filter(x => x).sort();
+      setExtOptions(uniqueExts.map(e => ({ key: e, text: e })));
+
+      // 2. Dropdown Clientes
+      const uniqueClients = Array.from(new Set(enrichedFiles.map(f => f._Client))).filter(x => x !== "Raiz").sort();
+      setClientOptions(uniqueClients.map(c => ({ key: c, text: c })));
+
+      // 3. Dropdown Autores
+      const uniqueAuthors = Array.from(new Set(enrichedFiles.map(f => f.Editor))).sort();
+      setAuthorOptions(uniqueAuthors.map(a => ({ key: a, text: a })));
+
+    } catch (e) {
+      props.onStatus("Erro ao carregar explorador.", false, MessageBarType.error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- EFEITO CASCATA: Quando seleciona Cliente, filtra os Assuntos ---
+  React.useEffect(() => {
+      if (selClient) {
+          const relevantItems = allItems.filter(i => i._Client === selClient);
+          const uniqueSubjects = Array.from(new Set(relevantItems.map(i => i._Subject))).sort();
+          setSubjectOptions(uniqueSubjects.map(s => ({ key: s, text: s })));
+      } else {
+          const allSubjects = Array.from(new Set(allItems.map(i => i._Subject))).filter(s => s !== "Geral").sort();
+          setSubjectOptions(allSubjects.map(s => ({ key: s, text: s })));
+      }
+      if (selSubject && selClient) {
+          const exists = allItems.some(i => i._Client === selClient && i._Subject === selSubject);
+          if (!exists) setSelSubject(undefined);
+      }
+  }, [selClient, allItems]);
+
+  // --- BUSCA AVANÇADA NO APP ---
+  const [isAdvancedSearchOpen, setIsAdvancedSearchOpen] = React.useState(false);
+  const [advSearchText, setAdvSearchText] = React.useState('');
+  const [searchMode, setSearchMode] = React.useState<string>("Frase Exata");
+
+  // --- CORREÇÃO AQUI: Executa a busca dentro do App ---
+  const handleAdvancedSearchLaunch = async () => {
+    if (!advSearchText) return;
+    
+    setIsAdvancedSearchOpen(false);
+    setLoading(true);
+
+    try {
+      // 1. Prepara o termo (Com aspas se for frase exata)
+      const term = searchMode === "Frase Exata" ? `"${advSearchText}"` : advSearchText;
+      
+      // 2. Chama o serviço (que já tem a lógica de Path da biblioteca)
+      const results = await props.spService.searchFilesNative(props.webPartProps.arquivosLocal, term);
+
+      if (results.length === 0) {
+        props.onStatus("Nenhum arquivo encontrado na busca.", false, MessageBarType.warning);
+        setSearchResults([]);
+      } else {
+        // 3. Enriquece os dados (Calcula Cliente/Assunto) para funcionar na tabela
+        const enrichedResults = enrichData(results);
+        
+        setSearchResults(enrichedResults);
+        setSearch(''); // Limpa a busca rápida local
+        props.onStatus(`Encontrados ${results.length} arquivos.`, false, MessageBarType.success);
+      }
+
+      setAdvSearchText('');
+
+    } catch (e) {
+      console.error("Erro na busca avançada:", e);
+      props.onStatus("Erro ao realizar busca.", false, MessageBarType.error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  React.useEffect(() => { void loadInitialData(); }, []);
+
+  // --- EFEITO MESTRE DE FILTRAGEM (Atualizado) ---
+  React.useEffect(() => {
+    // 1. Fonte de dados: Se tiver resultado de busca (mesmo vazio), usa ele. Se for null, usa Tudo.
+    let baseList = (searchResults !== null) ? searchResults : allItems;
+
+    // 2. Busca simples Local (O campo de texto no topo da lista)
+    if (search) {
+       baseList = baseList.filter(i => i.Name.toLowerCase().indexOf(search.toLowerCase()) > -1);
+    }
+
+    // 3. Aplicação dos Filtros (Dropdowns)
+    let result = baseList;
+
+    if (selExt) result = result.filter(i => i.Extension === selExt);
+    if (selClient) result = result.filter(i => i._Client === selClient);
+    if (selSubject) result = result.filter(i => i._Subject === selSubject);
+    if (selAuthor) result = result.filter(i => i.Editor === selAuthor);
+
+    setFilteredItems(result);
+
+  }, [search, searchResults, selExt, selClient, selSubject, selAuthor, allItems]);
+
+  if (isEditing && editingFileUrl) {
+      return (
+          <EditScreen 
+             fileUrl={editingFileUrl}
+             spService={props.spService}
+             webPartProps={props.webPartProps}
+             onBack={() => {
+                 setIsEditing(false);
+                 setEditingFileUrl(null);
+                 void loadInitialData(); 
+             }}
+          />
+      );
+  }
+
+  const handleRefresh = async () => {
+      setSearch(''); 
+      setSearchResults(null);
+      await loadInitialData(); 
+      props.onStatus("Dados atualizados.", false, MessageBarType.success);
+  };
+
+  const clearFilters = () => {
+      setSearch(''); 
+      setSearchResults(null); // Volta a mostrar todos os itens
+      setSelExt(undefined); 
+      setSelClient(undefined);
+      setSelSubject(undefined);
+      setSelAuthor(undefined);
+  };
+
+  return (
+  <div className={styles.containerCard}>
+    
+    <div className={styles.header}>
+      <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 15 }}>
+        <IconButton 
+          iconProps={{ iconName: 'Back' }} 
+          onClick={props.onBack} 
+          styles={{ root: { height: 40, width: 40 }, icon: { fontSize: 20 } }}
+        />
+        <div className={styles.headerTitleBlock}>
+          <h2 className={styles.title}>Explorador de Arquivos</h2>
+          {searchResults !== null ? (
+             <span className={styles.subtitle} style={{color: '#d13438', fontWeight: 'bold'}}>
+               Exibindo Resultados da Busca • <a style={{cursor:'pointer', textDecoration:'underline'}} onClick={clearFilters}>Limpar Busca</a>
+             </span>
+          ) : (
+             <span className={styles.subtitle}>Visão geral de todos os documentos</span>
+          )}
+        </div>
+      </Stack>
+
+      <div className={styles.headerControls}>
+          <IconButton 
+            iconProps={{ iconName: 'Sync' }} 
+            title="Atualizar lista"
+            disabled={loading}
+            onClick={handleRefresh}
+            styles={{ root: { color: '#0078d4' } }}
+          />
+      
+        <IconButton 
+          iconProps={{ iconName: 'AutoEnhanceOn' }} 
+          title="Busca Avançada" 
+          onClick={() => setIsAdvancedSearchOpen(true)} 
+        />
+        <PrimaryButton 
+          iconProps={{ iconName: 'Filter' }} 
+          text="Filtros" 
+          onClick={() => setIsFilterPanelOpen(true)} 
+        />
+      </div>
+
+    </div>
+
+    <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 4, minHeight: '500px' }}>
+      {loading ? (
+        <Spinner size={SpinnerSize.large} label="Processando..." style={{ marginTop: 50 }} />
+      ) : filteredItems.length > 0 ? (
+        <div style={{ display: 'block', width: '100%' }}>
+          <DetailsList
+            items={filteredItems}
+            columns={columns}
+            layoutMode={DetailsListLayoutMode.justified}
+            selectionMode={SelectionMode.none}
+          />
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', padding: 60 }}>
+          <Icon iconName="SearchIssue" style={{ fontSize: 48, color: '#c8c6c4', marginBottom: 20 }} />
+          <p style={{ fontSize: 16, color: '#605e5c', margin: 0 }}>
+             {searchResults !== null 
+                ? "A busca não retornou resultados (ou os filtros ocultaram tudo)." 
+                : "Nenhum arquivo corresponde aos filtros selecionados."}
+          </p>
+          <DefaultButton 
+            text="Limpar Tudo" 
+            onClick={clearFilters} 
+            style={{ marginTop: 20 }}
+          />
+        </div>
+      )}
+    </div>
+
+    <Panel 
+      isOpen={isFilterPanelOpen} 
+      onDismiss={() => setIsFilterPanelOpen(false)} 
+      headerText="Filtros"
+      type={PanelType.custom}
+      customWidth="350px"
+    >
+      <Stack tokens={{ childrenGap: 20 }} style={{ marginTop: 20 }}>
+        
+        <Dropdown 
+          label="Cliente" 
+          options={clientOptions} 
+          selectedKey={selClient} 
+          onChange={(e, o) => setSelClient(o?.key as string)} 
+          placeholder="Selecione o Cliente"
+          onRenderLabel={(props) => (
+             <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 5 }}>
+                 <Icon iconName="FabricFolder" style={{color:'#0078d4'}} />
+                 <span>{props?.label}</span>
+             </Stack>
+          )}
+        />
+
+        <Dropdown 
+          label="Assunto" 
+          options={subjectOptions} 
+          selectedKey={selSubject} 
+          onChange={(e, o) => setSelSubject(o?.key as string)} 
+          placeholder={selClient ? "Selecione o Assunto" : "Selecione o Cliente primeiro"}
+          disabled={!selClient && subjectOptions.length > 100}
+          onRenderLabel={(props) => (
+             <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 5 }}>
+                 <Icon iconName="FabricFolder" style={{color:'#00b294'}} />
+                 <span>{props?.label}</span>
+             </Stack>
+          )}
+        />
+
+        <Separator />
+
+        <Dropdown 
+          label="Autor / Editor" 
+          options={authorOptions} 
+          selectedKey={selAuthor} 
+          onChange={(e, o) => setSelAuthor(o?.key as string)} 
+          placeholder="Quem modificou?"
+        />
+
+        <Dropdown 
+          label="Tipo de Arquivo" 
+          options={extOptions} 
+          selectedKey={selExt} 
+          onChange={(e, o) => setSelExt(o?.key as string)} 
+          placeholder="Ex: .pdf, .docx"
+        />
+        
+        <Stack horizontal tokens={{ childrenGap: 10 }} style={{ marginTop: 30 }}>
+          <PrimaryButton text="Ver Resultados" onClick={() => setIsFilterPanelOpen(false)} styles={{root:{flex:1}}} />
+          <DefaultButton 
+            text="Limpar" 
+            onClick={clearFilters} 
+          />
+        </Stack>
+      </Stack>
+    </Panel>
+
+    {/* Modal de Busca Avançada */}
+    <Modal
+      isOpen={isAdvancedSearchOpen}
+      onDismiss={() => setIsAdvancedSearchOpen(false)}
+      isBlocking={false}
+      styles={{ main: { maxWidth: 800, borderRadius: 30, overflow: 'hidden' } }}
+    >
+       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: 'white' }}>
+          <div style={{ backgroundColor: '#0078d4', width: '100%', textAlign: 'center', padding: '30px 0' }}>
+            <Icon iconName="Search" style={{ fontSize: 35, color: 'white' }} />
+          </div>
+          <div style={{ padding: '20px 40px', width: '100%', boxSizing: 'border-box' }}>
+            <h2 style={{ textAlign: 'center', fontFamily: 'Segoe UI', fontWeight: 600 }}>Pesquisa Avançada</h2>
+            <Stack horizontal tokens={{ childrenGap: 10 }} style={{ marginTop: 20 }}>
+              <TextField 
+                placeholder="Digite o termo..." 
+                value={advSearchText}
+                onChange={(e, v) => setAdvSearchText(v || '')}
+                styles={{ root: { flexGrow: 1 } }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAdvancedSearchLaunch(); }}
+              />
+              <Dropdown
+                options={[ { key: 'Frase Exata', text: 'Frase Exata' }, { key: 'Todas as Palavras', text: 'Todas as Palavras' } ]}
+                selectedKey={searchMode}
+                onChange={(e, o) => setSearchMode(o?.key as string)}
+                styles={{ root: { width: 180 } }}
+              />
+            </Stack>
+            <Stack horizontal horizontalAlign="center" tokens={{ childrenGap: 15 }} style={{ marginTop: 30, marginBottom: 10 }}>
+              <DefaultButton text="Cancelar" onClick={() => setIsAdvancedSearchOpen(false)} styles={{ root: { borderRadius: 20, width: 140 } }} />
+              <PrimaryButton text="Pesquisar" disabled={!advSearchText} onClick={handleAdvancedSearchLaunch} styles={{ root: { borderRadius: 20, width: 140 } }} />
+            </Stack>
+          </div>
+       </div>
+    </Modal>
+  </div>
+  );
+};
+
+/*import * as React from 'react';
+import { 
+  Stack, IconButton, TextField, DetailsList, DetailsListLayoutMode, 
+  SelectionMode, IColumn, Spinner, SpinnerSize, MessageBarType, Icon,
+  PrimaryButton, DefaultButton, Panel, PanelType, Dropdown, IDropdownOption , Modal, 
   getTheme, mergeStyleSets, Separator
 } from '@fluentui/react';
 import styles from "../WebPartArquivos.module.scss";
@@ -340,7 +868,7 @@ export const FileExplorerScreen: React.FunctionComponent<{
       </Stack>
 
       <div className={styles.headerControls}>
-          {/* --- NOVO BOTÃO DE REFRESH --- */}
+          {/* --- NOVO BOTÃO DE REFRESH --- }
           <IconButton 
             iconProps={{ iconName: 'Sync' }} // Ícone de Sincronização
             title="Atualizar lista"
@@ -456,7 +984,7 @@ export const FileExplorerScreen: React.FunctionComponent<{
       </Stack>
     </Panel>
 
-    {/* Modal de Busca Avançada (Mantido igual) */}
+    {/* Modal de Busca Avançada (Mantido igual) }
     <Modal
       isOpen={isAdvancedSearchOpen}
       onDismiss={() => setIsAdvancedSearchOpen(false)}
@@ -493,7 +1021,7 @@ export const FileExplorerScreen: React.FunctionComponent<{
     </Modal>
   </div>
   );
-};
+};*/
 
 /*import * as React from 'react';
 import { 

@@ -255,6 +255,7 @@ export class SharePointService {
         return this._context.pageContext.web.absoluteUrl;
     }
 
+  /* Funciona externo
   public async searchFilesNative(baseUrl: string, queryText: string): Promise<any[]> {
 
     try {
@@ -354,8 +355,108 @@ export class SharePointService {
       console.error("❌ Erro Search GET:", e);
       return [];
     }
-  }
+  }*/
 
+
+/*funciona interno*/
+    public async searchFilesNative(baseUrl: string, queryText: string): Promise<any[]> {
+    try {
+      // 1. Limpeza da URL
+      let cleanUrl = this.getCleanFullUrl(baseUrl);
+      cleanUrl = decodeURIComponent(cleanUrl);
+      if (cleanUrl.startsWith('http:')) cleanUrl = cleanUrl.replace('http:', 'https:');
+      if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+
+      // 2. Termo
+      let term = queryText.trim();
+      if (term.indexOf('"') === -1) {
+          if (term.indexOf(' ') === -1 && !term.endsWith('*')) {
+              term = `${term}*`;
+          }
+      }
+
+      // 3. KQL
+      const kql = `${term} AND Path:"${cleanUrl}*"`;
+
+      // 4. API (MODO NUCLEAR: Apenas Title e Path)
+      // Removemos Author, Editor, Created, Modified para isolar o erro 500.
+      const selectProps = "Title,Path";
+
+      const endpoint = `${this._context.pageContext.web.absoluteUrl}/_api/search/query?querytext='${encodeURIComponent(kql)}'&selectproperties='${selectProps}'&rowlimit=100&trimduplicates=false`;
+
+      console.log(`🔍 Teste Conectividade Search: [${kql}]`);
+
+      const response: SPHttpClientResponse = await this._context.spHttpClient.get(
+        endpoint,
+        SPHttpClient.configurations.v1
+      );
+
+      if (!response.ok) {
+          console.error(`❌ AINDA ERRO 500? (${response.status}):`, await response.text());
+          return [];
+      }
+      
+      const json = await response.json();
+      console.log("✅ SUCESSO! JSON RECEBIDO:", json); // <--- QUERO VER ISSO NO CONSOLE
+
+      const rawRows = json.PrimaryQueryResult?.RelevantResults?.Table?.Rows || [];
+
+      if (rawRows.length === 0) {
+        console.warn(`🔍 0 resultados.`);
+        return [];
+      }
+
+      // 5. Mapeamento (Preenchemos dados faltantes com "Desconhecido" por enquanto)
+      return rawRows.map((row: any, index: number) => {
+          const item: any = {};
+          if (row.Cells) {
+              row.Cells.forEach((cell: any) => { item[cell.Key] = cell.Value; });
+          }
+
+          // Cálculos manuais
+          const fullPath = item.Path || "";
+          let serverRelativeUrl = "";
+          let fileNameFromPath = "";
+
+          if (fullPath) {
+              try {
+                  const urlObj = new URL(fullPath);
+                  serverRelativeUrl = decodeURIComponent(urlObj.pathname);
+                  const parts = serverRelativeUrl.split('/');
+                  fileNameFromPath = parts[parts.length - 1];
+              } catch {
+                  serverRelativeUrl = fullPath;
+              }
+          }
+
+          let nome = fileNameFromPath || item.Title || "Arquivo";
+          let ext = "";
+          if (nome.indexOf('.') > -1) ext = nome.split('.').pop() || "";
+          if (ext && ext.indexOf('.') !== 0) ext = `.${ext}`;
+
+          return {
+              Name: nome,
+              Title: item.Title || nome,
+              Extension: ext,
+              ServerRelativeUrl: serverRelativeUrl,
+              
+              // Como não pedimos na query, usamos data atual e sistema
+              // Se isso funcionar, depois adicionamos 'Created' e 'Modified'
+              Created: new Date().toISOString(), 
+              Modified: new Date().toISOString(),
+              Editor: "Sistema", 
+              Author: { Title: "Sistema" },
+              
+              Id: index,
+              key: `search-${index}`
+          };
+      });
+
+    } catch (e) {
+      console.error("❌ Erro Geral:", e);
+      return [];
+    }
+  }
   // ---LOG ---
 
   public async getLogCount(logUrl: string, userEmail: string): Promise<number> {
