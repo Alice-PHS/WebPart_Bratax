@@ -7,6 +7,7 @@ import { ViewerScreen } from './screens/ViewerScreen';
 import { CleanupScreen } from './screens/CleanupScreen';
 import { PermissionsScreen } from './screens/PermissionsScreen'; 
 import { FileExplorerScreen } from './screens/FileExplorerScreen';
+import { CicloDeVidaScreen } from './screens/CiclodeVidaScreen';
 import { MessageBar, MessageBarType, Icon, Modal, Dropdown, Stack, DefaultButton, PrimaryButton, TextField } from '@fluentui/react';
 import styles from "./WebPartArquivos.module.scss";
 import { Screen } from '../models/IAppState';
@@ -154,6 +155,7 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
     if (currentScreen === 'CLEANUP') pageTitle = "Manutenção e Limpeza";
     if (currentScreen === 'EXPLORER') pageTitle = "Explorador Geral";
     if (currentScreen === 'PERMISSIONS') pageTitle = "Gestão de Acessos";
+    if (currentScreen === 'CICLO_DE_VIDA') pageTitle = "Ciclo de Vida";
 
     // URL do Logo - Agora a variável existe
     const logoUrl = (imagemLogo as any) || ""; 
@@ -243,6 +245,9 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
                   </button>
                   <button className={`${styles.navItem} ${currentScreen === 'PERMISSIONS' ? styles.active : ''}`} onClick={() => this._navigate('PERMISSIONS')}>
                     <Icon iconName="Permissions" /><span>Permissões</span>
+                  </button>
+                  <button className={`${styles.navItem} ${currentScreen === 'CICLO_DE_VIDA' ? styles.active : ''}`} onClick={() => this._navigate('CICLO_DE_VIDA')}>
+                    <Icon iconName="Clock" /><span>Ciclo de Vida</span>
                   </button>
                 </>
               )}
@@ -342,6 +347,15 @@ export default class WebPartArquivos extends React.Component<IWebPartArquivosPro
                 <PermissionsScreen 
                   spService={this._spService}
                   webPartProps={this.props}
+                  onBack={() => this._navigate('HOME')}
+                  onStatus={this._handleStatus}
+                />
+              )}
+
+              {currentScreen === 'CICLO_DE_VIDA' && (
+                <CicloDeVidaScreen 
+                  spService={this._spService}
+                  webPartProps={this.props as any}
                   onBack={() => this._navigate('HOME')}
                   onStatus={this._handleStatus}
                 />

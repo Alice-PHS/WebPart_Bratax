@@ -2,7 +2,7 @@ import * as React from 'react';
 import { 
   Stack, IconButton, TextField, PrimaryButton, DefaultButton, 
   Pivot, PivotItem, Label, Spinner, SpinnerSize, MessageBar, 
-  MessageBarType, Icon, Separator, Persona, PersonaSize
+  MessageBarType, Icon, Separator, Dropdown, IDropdownOption 
 } from '@fluentui/react';
 import { Field, Switch } from "@fluentui/react-components";
 import { NormalPeoplePicker } from '@fluentui/react/lib/Pickers';
@@ -11,7 +11,7 @@ import styles from "../WebPartArquivos.module.scss";
 import { SharePointService } from '../../services/SharePointService';
 import { IWebPartProps } from '../../models/IAppState';
 import { calculateHash } from '../../utils/FileUtils';
-import { LogTable } from '../LogTable'; // <--- Importando seu componente de tabela moderna
+import { LogTable } from '../LogTable';
 
 interface IEditProps {
   fileUrl: string;
@@ -29,14 +29,17 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
   // Estados do Formulário Principal
   const [title, setTitle] = React.useState('');
   
-  // --- NOVOS ESTADOS PARA LOCALIZAÇÃO ---
+  // --- ESTADOS DE LOCALIZAÇÃO ---
   const [nomeBiblioteca, setNomeBiblioteca] = React.useState('');
   const [nomeCliente, setNomeCliente] = React.useState('');
   const [assunto, setAssunto] = React.useState('');
-  // --------------------------------------
+  
+  // --- ESTADOS DO CICLO DE VIDA ---
+  const [cicloAtivo, setCicloAtivo] = React.useState(false); 
+  const [selectedCiclo, setSelectedCiclo] = React.useState<string>(''); 
+  const [cicloOptions, setCicloOptions] = React.useState<IDropdownOption[]>([]); 
 
   const [responsavel, setResponsavel] = React.useState<IPersonaProps[]>([]);
-  const [cicloDeVida, setCicloDeVida] = React.useState('');
   const [ementa, setEmenta] = React.useState('');
 
   // Estados de Logs e Anexos
@@ -51,13 +54,24 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
   const [anexoResponsavel, setAnexoResponsavel] = React.useState<IPersonaProps[]>([]);
 
   // --------------------------------------------------------------------------------
-  // FUNÇÕES DE CARREGAMENTO
+  // FUNÇÕES DE CARREGAMENTO (MANTIDAS IGUAIS)
   // --------------------------------------------------------------------------------
+  const carregarCiclosDeVida = async () => {
+    if (!props.webPartProps.listaCicloVida) return;
+    try {
+        const items = await props.spService.getCicloVidaItems(props.webPartProps.listaCicloVida);
+        const options = items.map((item: any) => ({
+            key: item.Title,
+            text: item.Title
+        }));
+        setCicloOptions(options);
+    } catch (e) {
+        console.error("Erro ao carregar ciclos de vida", e);
+    }
+  };
 
   const loadAttachments = async (paiId: number) => {
       try {
-        // MUDANÇA: Passamos props.fileUrl (URL do Pai) e paiId
-        // O serviço vai se virar para achar a biblioteca e pasta corretas
         const files = await props.spService.getRelatedFiles(props.fileUrl, paiId);
         setAttachments(files);
       } catch (e) {
@@ -78,18 +92,14 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
     setLoading(true);
     setMsg(null);
     try {
-      // 1. Carrega Metadados do Arquivo
       const data = await props.spService.getFileMetadata(props.fileUrl);
 
       if (data) {
         setItemData(data);
         
-        // 2. Preenche os campos do formulário
-        if (data.FileLeafRef) {
-          setTitle(data.FileLeafRef);
-        }
+        if (data.FileLeafRef) setTitle(data.FileLeafRef);
 
-        // --- LÓGICA DE EXTRAÇÃO: BIBLIOTECA / CLIENTE / ASSUNTO ---
+        // --- LÓGICA DE LOCALIZAÇÃO ---
         if (data.FileDirRef) {
             try {
                 let libUrlPath = "";
@@ -101,8 +111,8 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
                     libNameDisplay = libUrlPath.split('/').filter(p => p).pop() || "Documentos";
                     
                     if(libNameDisplay.toLowerCase() === 'forms') {
-                         const parts = libUrlPath.split('/').filter(p => p);
-                         libNameDisplay = parts[parts.length - 2]; 
+                          const parts = libUrlPath.split('/').filter(p => p);
+                          libNameDisplay = parts[parts.length - 2]; 
                     }
                 }
 
@@ -115,31 +125,32 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
                     const relativePath = decodeURIComponent(data.FileDirRef).substring(libUrlPath.length);
                     const folders = relativePath.split('/').filter(p => p);
 
-                    if (folders.length > 0) {
-                        setNomeCliente(folders[0]); 
-                    } else {
-                        setNomeCliente("Raiz da Biblioteca");
-                    }
+                    if (folders.length > 0) setNomeCliente(folders[0]); 
+                    else setNomeCliente("Raiz da Biblioteca");
 
-                    if (folders.length > 1) {
-                        setAssunto(folders.slice(1).join(' / ')); 
-                    } else {
-                        setAssunto('Geral');
-                    }
+                    if (folders.length > 1) setAssunto(folders.slice(1).join(' / ')); 
+                    else setAssunto('Geral');
                 } else {
                     const parts = data.FileDirRef.split('/').filter((p: string) => p);
                     setAssunto(parts[parts.length - 1]);
                     setNomeCliente(parts.length > 1 ? parts[parts.length - 2] : "Indefinido");
                 }
-
             } catch (err) {
-                console.warn("Erro ao fazer parse dos caminhos:", err);
+                console.warn("Erro parse caminhos:", err);
                 setAssunto(data.FileDirRef);
             }
         }
-        // -----------------------------------------------------------
 
-        setCicloDeVida(data.CiclodeVida || data.Ciclo_x0020_de_x0020_Vida || data.CicloDeVida || 'Inativo');
+        // --- CICLO DE VIDA ---
+        const valorAtual = data.CiclodeVida || data.Ciclo_x0020_de_x0020_Vida || data.CicloDeVida || 'Inativo';
+        if (!valorAtual || valorAtual === 'Inativo') {
+            setCicloAtivo(false);
+            setSelectedCiclo('');
+        } else {
+            setCicloAtivo(true);
+            setSelectedCiclo(valorAtual);
+        }
+
         setEmenta(data.DescricaoDocumento || data.Ementa || '');
 
         const resp = data.Respons_x00e1_vel || data.Responsável || data.Responsavel;
@@ -151,10 +162,7 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
           } as any]);
         }
 
-        await Promise.all([
-            loadLogs(data.Id),
-            loadAttachments(data.Id)
-        ]);
+        await Promise.all([ loadLogs(data.Id), loadAttachments(data.Id) ]);
       }
     } catch (e) {
       console.error(e);
@@ -165,11 +173,12 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
   };
 
   React.useEffect(() => {
+    void carregarCiclosDeVida();
     void refreshAllData();
   }, [props.fileUrl]);
 
   // --------------------------------------------------------------------------------
-  // AÇÕES
+  // AÇÕES (SALVAR E ANEXOS)
   // --------------------------------------------------------------------------------
 
   const onResolveSuggestions = async (filterText: string): Promise<IPersonaProps[]> => {
@@ -182,6 +191,11 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
   };
 
   const handleSave = async () => {
+    if (cicloAtivo && !selectedCiclo) {
+        setMsg({ text: "Selecione uma regra de Ciclo de Vida ou marque como Inativo.", type: MessageBarType.error });
+        return;
+    }
+
     setSaving(true);
     setMsg(null);
     try {
@@ -193,10 +207,12 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
             ? title 
             : `${title}.${extensao}`;
 
+        const valorCicloFinal = cicloAtivo ? selectedCiclo : "Inativo";
+
         const updates: any = {
             Title: title,
             FileLeafRef: novoNomeArquivo,
-            CiclodeVida: cicloDeVida, 
+            CiclodeVida: valorCicloFinal, 
             DescricaoDocumento: ementa 
         };
 
@@ -239,6 +255,44 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
     }
   };
 
+  // --- NOVA FUNÇÃO DE EXCLUSÃO ---
+  const handleDeleteMainFile = async () => {
+    if (!confirm("ATENÇÃO: Tem certeza que deseja excluir este documento?\nEsta ação não poderá ser desfeita e o histórico ficará salvo apenas como registro.")) {
+        return;
+    }
+
+    setSaving(true);
+    try {
+        // 1. REGISTRAR O LOG ANTES DE APAGAR O ARQUIVO
+        const user = props.webPartProps.context.pageContext.user;
+        const userIdLog = String(props.webPartProps.context.pageContext.legacyPageContext.userId || '0');
+
+        await props.spService.registrarLog(
+            props.webPartProps.listaLogURL, 
+            itemData.FileLeafRef, // Nome do arquivo atual
+            user.displayName, 
+            user.email, 
+            userIdLog, 
+            "Exclusão de Documento", // Ação Específica
+            String(itemData.Id), 
+            nomeBiblioteca
+        );
+
+        // 2. APAGAR O ARQUIVO DO SHAREPOINT
+        // Tenta usar o FileRef (caminho relativo) do item carregado, ou a props original
+        const fileUrlToDelete = itemData.FileRef || props.fileUrl;
+        await props.spService.deleteFile(fileUrlToDelete);
+
+        // 3. VOLTAR PARA A TELA ANTERIOR
+        props.onBack();
+
+    } catch (e) {
+        console.error("Erro ao excluir arquivo", e);
+        setMsg({ text: "Erro ao excluir o documento. Verifique suas permissões.", type: MessageBarType.error });
+        setSaving(false);
+    }
+  };
+
   const handleSaveAttachment = async () => {
     if (!selectedFile || !attachmentName || !anexoEmenta) {
         setMsg({ text: "Preencha Nome, Ementa e selecione um arquivo.", type: MessageBarType.warning });
@@ -248,8 +302,6 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
     setSaving(true);
     try {
         const hash = await calculateHash(selectedFile);
-        
-        // Verifica duplicidade usando o caminho do arquivo pai (itemData.FileDirRef)
         const duplicado = await props.spService.checkDuplicateHash(
             props.webPartProps.arquivosLocal, 
             itemData.FileDirRef, 
@@ -281,18 +333,14 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
             Title: attachmentName
         };
 
-        if (responsavelId) {
-            metadadosAnexo.Respons_x00e1_velId = responsavelId;
-        }
+        if (responsavelId) metadadosAnexo.Respons_x00e1_velId = responsavelId;
 
-        // --- AQUI A MUDANÇA: USAMOS O MÉTODO DINÂMICO ---
         const novoId = await props.spService.uploadAnexoDinamico(
-            props.fileUrl, // Passamos a URL do arquivo pai para ele descobrir onde salvar
+            props.fileUrl, 
             nomeFinal,
             selectedFile,
             metadadosAnexo
         );
-        // -----------------------------------------------
 
         const user = props.webPartProps.context.pageContext.user;
         const userIdLog = String(props.webPartProps.context.pageContext.legacyPageContext.userId || '0');
@@ -310,7 +358,6 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
 
         setMsg({ text: "Anexo salvo e vinculado com sucesso!", type: MessageBarType.success });
         
-        // Limpa o formulário
         setAttachmentName('');
         setAnexoEmenta('');
         setAnexoResponsavel([]);
@@ -325,7 +372,7 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
     } finally {
         setSaving(false);
     }
-};
+  };
 
   // --------------------------------------------------------------------------------
   // RENDERIZAÇÃO
@@ -366,7 +413,7 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
                
                {/* ABA 1: INFORMAÇÕES */}
                <PivotItem headerText="Informações do documento" itemIcon="Edit">
-                  <Stack tokens={{ childrenGap: 15 }} style={{ padding: 20, maxWidth: 600 }}>
+                  <Stack tokens={{ childrenGap: 15 }} style={{ padding: 20, maxWidth: '100%' }}>
                       <TextField label="Título" value={title} onChange={(e, v) => setTitle(v || '')} required />
                       
                       <div style={{display:'flex', gap: 20}}>
@@ -374,17 +421,37 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
                           <TextField label="Cliente" value={nomeCliente} readOnly disabled styles={{root:{flex:1}}} />
                       </div>
 
-                      <div style={{display:'flex', gap: 20}}>
-                          <TextField label="Assunto / Pasta" value={assunto} readOnly disabled styles={{root:{flex:1}}} />
-                          <Field label="Ciclo de Vida">
-                          <Switch
-                            checked={cicloDeVida === "Ativo"}
-                            onChange={(ev, data) => setCicloDeVida(data.checked ? "Ativo" : "Inativo")}
-                            label={cicloDeVida === "Ativo" ? "Ativo" : "Inativo"}
-                            required
-                          />
-                          </Field>
-                      </div>
+                      <TextField label="Assunto / Pasta" value={assunto} readOnly disabled styles={{root:{width:'100%'}}} />
+
+                      {/* BLOCO DE CICLO DE VIDA */}
+                      <Stack horizontal verticalAlign="start" tokens={{ childrenGap: 20 }} style={{ background: '#f9f9f9', padding: 15, borderRadius: 6, border: '1px solid #f3f2f1' }}>
+                        <div>
+                            <Field label="Ciclo de Vida">
+                                <Switch
+                                    checked={cicloAtivo}
+                                    onChange={(ev, data) => {
+                                        setCicloAtivo(data.checked);
+                                        if (!data.checked) setSelectedCiclo('');
+                                    }}
+                                    label={cicloAtivo ? "Ativo" : "Inativo"}
+                                />
+                            </Field>
+                        </div>
+                        
+                        {cicloAtivo && (
+                            <div style={{ flex: 1, animation: 'fadeIn 0.3s ease-in' }}>
+                                <Dropdown
+                                    label="Selecione a Regra"
+                                    placeholder="Escolha um ciclo..."
+                                    options={cicloOptions}
+                                    selectedKey={selectedCiclo}
+                                    onChange={(e, o) => setSelectedCiclo(o?.key as string)}
+                                    required
+                                    styles={{ root: { width: '100%' } }}
+                                />
+                            </div>
+                        )}
+                      </Stack>
 
                       <TextField 
                         label="Ementa" 
@@ -405,52 +472,48 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
 
                       <Separator />
                       
-                      <Stack horizontal tokens={{ childrenGap: 15 }}>
-                          <PrimaryButton text="Salvar Alterações" onClick={() => void handleSave()} disabled={saving} />
-                          <DefaultButton text="Cancelar" onClick={props.onBack} disabled={saving} />
-                      </Stack>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          {/* BOTÃO EXCLUIR (Lado Esquerdo) */}
+                          <DefaultButton 
+                             text="Excluir Documento" 
+                             iconProps={{ iconName: 'Delete' }}
+                             onClick={() => void handleDeleteMainFile()}
+                             disabled={saving}
+                             styles={{ 
+                                 root: { color: '#a4262c', borderColor: '#a4262c', borderRadius: 4 }, 
+                                 rootHovered: { background: '#a4262c', color: 'white', borderColor: '#a4262c' } 
+                             }}
+                          />
+
+                          {/* BOTÕES SALVAR/CANCELAR (Lado Direito) */}
+                          <Stack horizontal tokens={{ childrenGap: 15 }}>
+                              <DefaultButton text="Cancelar" onClick={props.onBack} disabled={saving} />
+                              <PrimaryButton 
+                                text="Salvar Alterações" 
+                                onClick={() => void handleSave()} 
+                                disabled={saving || (cicloAtivo && !selectedCiclo)} 
+                              />
+                          </Stack>
+                      </div>
+
                   </Stack>
                </PivotItem>
 
-               {/* ABA 2: LOGS (AGORA USANDO O LogTable MODERNO) */}
+               {/* ABA 2: LOGS */}
                <PivotItem headerText="Histórico / Log" itemIcon="History">
                   <div style={{ padding: 20 }}>
                       <Label style={{ marginBottom: 15, fontSize: 16 }}>Trilha de Auditoria</Label>
-                      
-                      {/* Componente LogTable Moderno (v9) */}
                       <LogTable logs={logs} />
-                      
                       <Stack horizontal tokens={{ childrenGap: 40 }} style={{ marginTop: 15 }}>
-    
-    {/* COLUNA 1: DADOS DE CRIAÇÃO */}
-    <Stack tokens={{ childrenGap: 10 }} style={{ width: '50%' }}>
-        <TextField 
-            label="Criado em" 
-            value={itemData ? new Date(itemData.Created).toLocaleString() : ''} 
-            readOnly borderless 
-        />
-        <TextField 
-            label="Criado por" 
-            value={itemData?.Author?.Title || ''} 
-            readOnly borderless
-        />
-    </Stack>
-
-    {/* COLUNA 2: DADOS DE MODIFICAÇÃO */}
-    <Stack tokens={{ childrenGap: 10 }} style={{ width: '50%' }}>
-        <TextField 
-            label="Modificado em" 
-            value={itemData ? new Date(itemData.Modified).toLocaleString() : ''} 
-            readOnly borderless 
-        />
-        <TextField 
-            label="Modificado por" 
-            value={itemData?.Editor?.Title || ''} 
-            readOnly borderless 
-        />
-    </Stack>
-
-</Stack>
+                            <Stack tokens={{ childrenGap: 10 }} style={{ width: '50%' }}>
+                                <TextField label="Criado em" value={itemData ? new Date(itemData.Created).toLocaleString() : ''} readOnly borderless />
+                                <TextField label="Criado por" value={itemData?.Author?.Title || ''} readOnly borderless />
+                            </Stack>
+                            <Stack tokens={{ childrenGap: 10 }} style={{ width: '50%' }}>
+                                <TextField label="Modificado em" value={itemData ? new Date(itemData.Modified).toLocaleString() : ''} readOnly borderless />
+                                <TextField label="Modificado por" value={itemData?.Editor?.Title || ''} readOnly borderless />
+                            </Stack>
+                      </Stack>
                   </div>
                </PivotItem>
 
@@ -459,6 +522,7 @@ export const EditScreen: React.FunctionComponent<IEditProps> = (props) => {
                  <div style={{ padding: 20, maxWidth: 800 }}>
                    <Stack tokens={{ childrenGap: 20 }}>
                      
+                     {/* ÁREA DE UPLOAD DO ANEXO */}
                      <div className={styles.uploadContainer} style={{ border: '2px dashed var(--smart-primary)', borderRadius: 8, padding: 30, backgroundColor: '#f3f9fd', position: 'relative', textAlign: 'center' }}>
                        <Stack horizontalAlign="center" tokens={{ childrenGap: 10 }}>
                            <Icon iconName="CloudUpload" style={{ fontSize: 48, color: 'var(--smart-primary)' }} />

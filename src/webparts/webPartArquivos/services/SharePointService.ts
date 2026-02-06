@@ -1535,4 +1535,92 @@ public async getAzureADGroupMembers(azureGroupId: string): Promise<any[]> {
         return [];
     }
 }
+// --- Ciclo de Vida ---
+// Método auxiliar para limpar a URL e pegar o caminho relativo da lista
+private getCleanListPath(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    let path = decodeURIComponent(urlObj.pathname);
+    // Remove AllItems.aspx ou qualquer página no final
+    if (path.toLowerCase().indexOf('.aspx') > -1) {
+      path = path.substring(0, path.lastIndexOf('/'));
+    }
+    // Remove barra final
+    if (path.endsWith('/')) path = path.slice(0, -1);
+    return path;
+  } catch (e) {
+    return url;
+  }
+}
+
+// BUSCAR ITENS
+public async getCicloVidaItems(CicloDeVidaUrl: string): Promise<any[]> {
+    if (!CicloDeVidaUrl) return [];
+    try {
+        const urlObj = new URL(CicloDeVidaUrl);
+        const siteUrl = urlObj.origin + urlObj.pathname.split('/Lists/')[0];
+        const listRelativePath = decodeURIComponent(urlObj.pathname).split('/AllItems.aspx')[0];
+
+        const targetWeb = spfi(siteUrl).using(SPFx(this._context)).web;
+
+        // Note: Usei os nomes internos prováveis. Verifique no seu SharePoint!
+        return await targetWeb.getList(listRelativePath).items
+            .select("Id", "Title", "Dura_x00e7__x00e3_o", "UnidadedeMedida")();
+    } catch (e) {
+        console.error("Erro ao buscar itens do ciclo de vida:", e);
+        return [];
+    }
+}
+
+public async addCicloVidaItem(
+    CicloDeVidaUrl: string, 
+    Título: string, 
+    Duração: string, 
+    UnidadedeMedida: string, 
+): Promise<void> {
+    const urlObj = new URL(CicloDeVidaUrl);
+    const siteUrl = urlObj.origin + urlObj.pathname.split('/Lists/')[0];
+    const listRelativePath = decodeURIComponent(urlObj.pathname).split('/AllItems.aspx')[0];
+    const targetWeb = spfi(siteUrl).using(SPFx(this._context)).web;
+
+    await targetWeb.getList(listRelativePath).items.add({
+        Title: Título,
+        Dura_x00e7__x00e3_o: Duração, // Nome interno para Duração
+        UnidadedeMedida: UnidadedeMedida, // Nome interno para Unidade de Medida
+    });
+}
+
+public async updateCicloVidaItem(
+    CicloDeVidaUrl: string,
+    id: number,
+    Título: string,
+    Duração: string,
+    UnidadedeMedida: string
+): Promise<void> {
+    const urlObj = new URL(CicloDeVidaUrl);
+    const siteUrl = urlObj.origin + urlObj.pathname.split('/Lists/')[0];
+    const listRelativePath = decodeURIComponent(urlObj.pathname).split('/AllItems.aspx')[0];
+    const targetWeb = spfi(siteUrl).using(SPFx(this._context)).web;
+
+    await targetWeb.getList(listRelativePath).items.getById(id).update({
+        Title: Título,
+        Dura_x00e7__x00e3_o: Duração,
+        UnidadedeMedida: UnidadedeMedida,
+    });
+}
+public async deleteCicloVidaItem(CicloDeVidaUrl: string, id: number): Promise<void> {
+    if (!CicloDeVidaUrl) return;
+    try {
+        const urlObj = new URL(CicloDeVidaUrl);
+        const siteUrl = urlObj.origin + urlObj.pathname.split('/Lists/')[0];
+        const listRelativePath = decodeURIComponent(urlObj.pathname).split('/AllItems.aspx')[0];
+        const targetWeb = spfi(siteUrl).using(SPFx(this._context)).web;
+
+        // Remove o item pelo ID e envia para a lixeira
+        await targetWeb.getList(listRelativePath).items.getById(id).recycle();
+    } catch (e) {
+        console.error("Erro ao excluir item do ciclo de vida:", e);
+        throw e;
+    }
+}
 }

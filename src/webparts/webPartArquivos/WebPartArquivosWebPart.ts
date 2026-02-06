@@ -23,7 +23,8 @@ export interface IWebPartArquivosWebPartProps {
   listaClientesCampo: string;
   listaLogURL: string;
   arquivosLocal: string;
-  
+  listaCicloVida: string;
+
   // Cores e Estilo
   colorBackground: string;
   colorAccent: string;
@@ -71,7 +72,8 @@ export default class WebPartArquivosWebPart extends BaseClientSideWebPart<IWebPa
         listaClientesCampo: this.properties.listaClientesCampo,
         listaLogURL: this.properties.listaLogURL,
         arquivosLocal: this.properties.arquivosLocal,
-        
+        listaCicloVida: this.properties.listaCicloVida,
+
         // Passando props (embora o CSS var resolva a maioria)
         colorBackground: this.properties.colorBackground,
         colorAccent: this.properties.colorAccent,
@@ -143,7 +145,8 @@ export default class WebPartArquivosWebPart extends BaseClientSideWebPart<IWebPa
                 PropertyPaneTextField('listaClientesURL', { label: "URL da Lista de Clientes" }),
                 PropertyPaneTextField('listaClientesCampo', { label: "Campo Interno (Nome do Cliente)" }),
                 PropertyPaneTextField('listaLogURL', { label: "URL da Lista de Logs" }),
-                PropertyPaneTextField('arquivosLocal', { label: "URL da Biblioteca de Documentos" })
+                PropertyPaneTextField('arquivosLocal', { label: "URL da Biblioteca de Documentos" }),
+                PropertyPaneTextField('listaCicloVida', { label: "URL da Lista de Ciclo de Vida" })
               ]
             },
             {

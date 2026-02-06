@@ -2,7 +2,7 @@ import { IDropdownOption, MessageBarType } from '@fluentui/react';
 import { WebPartContext } from "@microsoft/sp-webpart-base";
 
 // Tipos de Tela
-export type Screen = 'HOME' | 'UPLOAD' | 'VIEWER' | 'CLEANUP' | 'CLIENTS' | 'EXPLORER' | 'PERMISSIONS';
+export type Screen = 'HOME' | 'UPLOAD' | 'VIEWER' | 'CLEANUP' | 'CLIENTS' | 'EXPLORER' | 'PERMISSIONS' | 'CICLO_DE_VIDA';
 
 // Interface das Propriedades da WebPart (vinda do manifesto)
 export interface IWebPartProps {
@@ -10,6 +10,7 @@ export interface IWebPartProps {
   listaClientesURL: string;
   listaClientesCampo: string;
   listaLogURL: string;
+  listaCicloVida: string;
   arquivosLocal: string;
   colorBackground: string;
   colorAccent: string;
