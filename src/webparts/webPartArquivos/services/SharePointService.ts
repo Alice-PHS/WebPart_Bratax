@@ -90,7 +90,8 @@ export class SharePointService {
 
   // --- Leitura de Dados ---
   
-  public async getAllFilesFlat(baseUrl: string): Promise<any[]> {
+  // AGORA BUSCA EM TODAS AS BIBLIOTECAS (GLOBAL REAL)
+ public async getAllFilesFlat(baseUrl: string): Promise<any[]> {
     try {
         const targetWeb = this.getTargetWeb(baseUrl);
         const relativePath = this.cleanPath(baseUrl);
@@ -185,40 +186,195 @@ export class SharePointService {
     }
 }
 
-  public async getClientes(urlLista: string, campoOrdenacao: string): Promise<any[]> {
+public async getFolderContentsGlobal(targetPath: string) {
+    try {
+        // 1. Limpeza e Normalização do Caminho
+        let cleanPath = decodeURIComponent(targetPath);
+        if (cleanPath.indexOf('http') === 0) {
+            const urlObj = new URL(cleanPath);
+            cleanPath = urlObj.pathname;
+        }
+        cleanPath = cleanPath.replace(/\/$/, ""); // Remove barra no final
 
+        // 2. FORÇAR CONTEXTO DO SUBSITE
+        // Pegamos a URL do site onde a WebPart está instalada (ex: https://bratax.sharepoint.com/sites/Docs_atual)
+        const siteUrl = this._context.pageContext.web.absoluteUrl;
+        
+        // Criamos uma instância do PnPJS travada no subsite correto
+        const targetWeb = spfi(siteUrl).using(SPFx(this._context)).web;
+
+        console.log("Viewer - Buscando no Site:", siteUrl);
+        console.log("Viewer - Caminho da Pasta:", cleanPath);
+
+        // 3. Acessa a pasta usando o objeto Web do subsite
+        const folder = targetWeb.getFolderByServerRelativePath(cleanPath);
+
+        const [foldersData, filesData] = await Promise.all([
+            folder.folders.select("Name", "ServerRelativeUrl", "ItemCount")(),
+            folder.files
+                .expand("Author") 
+                .select("Name", "ServerRelativeUrl", "TimeLastModified", "Author/Email", "Author/Title", "Length")()
+        ]);
+
+        const mappedFiles = filesData.map((f: any) => ({
+            ...f,
+            AuthorEmail: f.Author?.Email || "",
+            Editor: f.Author?.Title || "Sistema",
+            Size: parseInt(f.Length || "0")
+        }));
+
+        return { folders: foldersData, files: mappedFiles };
+    } catch (error) {
+        console.error("Erro crítico no getFolderContentsGlobal:", error);
+        return { folders: [], files: [] };
+    }
+}
+
+
+// No arquivo SharePointService.ts
+
+public async getFileMetadataGlobal(fileUrl: string): Promise<any> {
+    try {
+        // 1. Descobre o local do arquivo
+        const info = this.getPathInfo(fileUrl);
+        if (!info) return null;
+
+        // 2. Conecta no site correto
+        const targetWeb = Web(info.siteUrl).using(SPFx(this._context));
+        const file = targetWeb.getFileByServerRelativePath(fileUrl);
+
+        // 3. Obtém o item
+        const item = await file.getItem();
+
+        // 4. Busca SEGURA:
+        // Usamos '*' para trazer todas as colunas disponíveis.
+        // Se pedirmos 'CiclodeVida' explicitamente e a coluna não existir, o SharePoint dá erro.
+        // Com '*', ele traz o que tiver.
+        const data = await item.select(
+            "*", 
+            "FileLeafRef", 
+            "FileDirRef",  
+            "Author/Title", "Author/EMail",
+            "Editor/Title", "Editor/EMail",
+            "Respons_x00e1_vel/Title", "Respons_x00e1_vel/EMail", "Respons_x00e1_vel/Id"
+        )
+        .expand("Author", "Editor", "Respons_x00e1_vel")();
+
+        return data;
+
+    } catch (error) {
+        console.error("Erro ao obter metadados (Viewer):", error);
+        // Retorna null para a tela tratar
+        return null;
+    }
+}
+
+public async getAllFilesGlobal(urlInput: string): Promise<any[]> {
+    try {
+        // 1. Pega todas as bibliotecas de documentos do site que não são ocultas
+        const libs = await this.getSiteLibraries();
+        
+        let allFiles: any[] = [];
+
+        // 2. Para cada biblioteca, busca os arquivos recursivamente
+        // Usamos um for...of para evitar problemas de concorrência pesada
+        for (const lib of libs) {
+            try {
+                const viewXml = `
+                <View Scope='RecursiveAll'>
+                    <Query>
+                        <Where>
+                            <Eq>
+                                <FieldRef Name='FSObjType' />
+                                <Value Type='Integer'>0</Value>
+                            </Eq>
+                        </Where>
+                        <OrderBy><FieldRef Name='Modified' Ascending='FALSE' /></OrderBy>
+                    </Query>
+                    <ViewFields>
+                        <FieldRef Name='ID'/><FieldRef Name='FileLeafRef'/><FieldRef Name='FileRef'/>
+                        <FieldRef Name='Created'/><FieldRef Name='Editor'/><FieldRef Name='File_x0020_Type'/>
+                    </ViewFields>
+                </View>`;
+
+                const data = await this._sp.web.getList(lib.url).renderListDataAsStream({
+                    ViewXml: viewXml
+                });
+
+                const items = data.Row || [];
+                
+                const mapped = items.map((item: any) => {
+                    let editorName = "Sistema";
+                    try {
+                        const editorArr = Array.isArray(item.Editor) ? item.Editor : JSON.parse(item.Editor || "[]");
+                        if (editorArr.length > 0) editorName = editorArr[0].title;
+                    } catch { editorName = item.Editor || "Sistema"; }
+
+                    return {
+                        Name: item.FileLeafRef,
+                        Extension: item.File_x0020_Type ? `.${item.File_x0020_Type}` : "",
+                        ServerRelativeUrl: item.FileRef,
+                        Created: item["Created."] || item.Created,
+                        Editor: editorName,
+                        Id: item.ID,
+                        Size: parseInt(item.File_x0020_Size || item.Size || 0),
+                        _LibraryName: lib.title // Guardamos o nome da lib para ajudar no filtro
+                    };
+                });
+
+                allFiles = allFiles.concat(mapped);
+            } catch (err) {
+                console.warn(`Pulei a biblioteca ${lib.title} por erro de acesso.`);
+            }
+        }
+
+        return allFiles;
+    } catch (e) {
+        console.error("Erro crítico ao listar arquivos globalmente:", e);
+        return [];
+    }
+}
+
+// Auxiliar para saber de qual biblioteca o arquivo veio
+private extractLibraryName(path: string): string {
+    const parts = path.split('/').filter(p => p);
+    // Em sites comuns, a lib é a 3ª ou 4ª parte (ex: /sites/nome/Documentos/...)
+    return parts.length >= 3 ? decodeURIComponent(parts[2]) : "Biblioteca";
+}
+
+  public async getClientes(urlLista: string, campoOrdenacao: string): Promise<any[]> {
     if (!urlLista) return [];
 
     try {
-        const urlObj = new URL(urlLista);
-        let serverRelativePath = decodeURIComponent(urlObj.pathname);
-
-        // Limpeza básica da URL
-        if (serverRelativePath.toLowerCase().indexOf('.aspx') > -1) {
-            serverRelativePath = serverRelativePath.substring(0, serverRelativePath.lastIndexOf('/'));
-        }
-        if (serverRelativePath.endsWith('/')) {
-            serverRelativePath = serverRelativePath.slice(0, -1);
+        // 1. Limpa AllItems.aspx e espaços
+        let cleanUrl = urlLista.trim();
+        if (cleanUrl.toLowerCase().indexOf('.aspx') > -1) {
+            cleanUrl = cleanUrl.substring(0, cleanUrl.lastIndexOf('/'));
         }
 
-        // 1. Descobre o Site Base (tudo antes de /Lists/)
-        const splitIndex = serverRelativePath.toLowerCase().indexOf('/lists/');
+        const urlObj = new URL(cleanUrl);
+        const serverRelativePath = decodeURIComponent(urlObj.pathname);
+
+        // 2. EXTRAÇÃO INTELIGENTE DO SITE
+        // Analisamos o caminho para saber se é um subsite (/sites/...) ou a Raiz (/)
+        let siteUrl = urlObj.origin;
+        const parts = serverRelativePath.split('/').filter(p => p);
         
-        let targetWeb;
-        
-        if (splitIndex > -1) {
-             // Caso Padrão: Conecta no subsite correto (ex: /sites/Docs_atual)
-             const siteUrl = urlObj.origin + serverRelativePath.substring(0, splitIndex);
-             targetWeb = Web(siteUrl).using(SPFx(this._context));
-        } else {
-             // Fallback: Tenta usar a web atual se a URL for estranha
-             targetWeb = this._sp.web;
+        if (parts[0] === 'sites' || parts[0] === 'teams') {
+            // Se for subsite, o siteUrl será https://dominio.sharepoint.com/sites/nome
+            siteUrl = `${urlObj.origin}/${parts[0]}/${parts[1]}`;
         }
 
-        // 2. Busca os itens
+        // 3. Conecta no contexto correto (Raiz ou Subsite)
+        const targetWeb = spfi(siteUrl).using(SPFx(this._context)).web;
+
+        console.log("Detectado Site Base:", siteUrl);
+        console.log("Caminho da Lista:", serverRelativePath);
+
+        // 4. Busca os itens
         const items = await targetWeb.getList(serverRelativePath).items
-            .select("Id", "Title", "FileLeafRef", campoOrdenacao)
-            .top(500) // Limite de segurança
+            .select("Id", "Title", campoOrdenacao)
+            .top(1000)
             .orderBy(campoOrdenacao, true)();
 
         return items;
@@ -227,7 +383,7 @@ export class SharePointService {
         console.error("Erro ao ler clientes:", error);
         return [];
     }
-  }
+}
 
   private getCleanFullUrl(baseUrl: string): string {
       try {
@@ -357,249 +513,130 @@ export class SharePointService {
     }
   }*/
 
-
-/*funciona interno
     public async searchFilesNative(baseUrl: string, queryText: string): Promise<any[]> {
     try {
-      // 1. Limpeza da URL
-      let cleanUrl = this.getCleanFullUrl(baseUrl);
-      cleanUrl = decodeURIComponent(cleanUrl);
-      if (cleanUrl.startsWith('http:')) cleanUrl = cleanUrl.replace('http:', 'https:');
-      if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+        const siteUrl = this._context.pageContext.web.absoluteUrl;
+        
+        // 1. Prepara termo
+        let term = queryText.trim();
+        // Se não tiver aspas nem asterisco, adiciona asterisco para busca parcial
+        if (term.indexOf('"') === -1 && term.indexOf(' ') === -1 && !term.endsWith('*')) {
+            term = `${term}*`;
+        }
 
-      // 2. Termo
-      let term = queryText.trim();
-      if (term.indexOf('"') === -1) {
-          if (term.indexOf(' ') === -1 && !term.endsWith('*')) {
-              term = `${term}*`;
-          }
-      }
+        // 2. Monta KQL
+        const kql = `${term} AND IsDocument:1 AND NOT(FileExtension:aspx)`;
+        
+        // Adicionei 'Description' no select caso o Summary venha vazio
+        const searchEndpoint = `${siteUrl}/_api/search/query?querytext='${encodeURIComponent(kql)}'&selectproperties='Path,HitHighlightedSummary,Description,ListId,ListItemId,Title,FileExtension,Author'&clienttype='ContentSearchRegular'&rowlimit=500`;
 
-      // 3. KQL
-      const kql = `${term} AND Path:"${cleanUrl}*"`;
+        const response = await this._context.spHttpClient.get(searchEndpoint, SPHttpClient.configurations.v1);
+        if (!response.ok) return [];
 
-      // 4. API (MODO NUCLEAR: Apenas Title e Path)
-      // Removemos Author, Editor, Created, Modified para isolar o erro 500.
-      const selectProps = "Title,Path";
+        const json = await response.json();
+        const rawRows = json.PrimaryQueryResult?.RelevantResults?.Table?.Rows || [];
 
-      const endpoint = `${this._context.pageContext.web.absoluteUrl}/_api/search/query?querytext='${encodeURIComponent(kql)}'&selectproperties='${selectProps}'&rowlimit=100&trimduplicates=false`;
+        // 3. Processa os resultados
+        const promises = rawRows.map(async (row: any, index: number) => {
+            const itemSearch: any = {};
+            row.Cells.forEach((cell: any) => { itemSearch[cell.Key] = cell.Value; });
 
-      console.log(`🔍 Teste Conectividade Search: [${kql}]`);
+            const fullPath = itemSearch.Path || "";
+            const urlObj = new URL(fullPath);
+            const serverRelativeUrl = decodeURIComponent(urlObj.pathname);
+            
+            // O Resumo vem da BUSCA, não da chamada secundária de Item
+            const searchSummary = itemSearch.HitHighlightedSummary || itemSearch.Description || "";
 
-      const response: SPHttpClientResponse = await this._context.spHttpClient.get(
-        endpoint,
-        SPHttpClient.configurations.v1
-      );
+            // Chamada secundária para pegar metadados precisos (FileDirRef para saber a estrutura de pastas)
+            try {
+                const itemApi = `${siteUrl}/_api/web/lists(guid'${itemSearch.ListId}')/items(${itemSearch.ListItemId})?$select=Created,Author/Title,FileDirRef&$expand=Author`;
+                const itemResp = await this._context.spHttpClient.get(itemApi, SPHttpClient.configurations.v1);
+                
+                if (itemResp.ok) {
+                    const realData = await itemResp.json();
+                    
+                    // Lógica para tentar achar o nome da Biblioteca
+                    // Pega o caminho da pasta: /sites/site/Biblioteca/Cliente/Assunto
+                    const dirParts = realData.FileDirRef.split('/').filter((p: string) => p);
+                    
+                    // Assume que a biblioteca é o índice 2 (se tiver /sites/site) ou 0 (se for raiz)
+                    // Ajuste conforme seu ambiente. Geralmente, num site collection, a lib é o 3º elemento (sites > nome > Lib)
+                    let libName = "Documentos";
+                    const siteSegmentIndex = dirParts.indexOf('sites');
+                    
+                    if (siteSegmentIndex > -1 && dirParts.length > siteSegmentIndex + 2) {
+                        libName = dirParts[siteSegmentIndex + 2];
+                    } else if (dirParts.length > 0) {
+                        // Fallback: Pega o primeiro segmento que não seja 'sites' ou nome do site
+                         libName = dirParts[0] === 'sites' ? dirParts[2] : dirParts[0];
+                    }
 
-      if (!response.ok) {
-          console.error(`❌ AINDA ERRO 500? (${response.status}):`, await response.text());
-          return [];
-      }
-      
-      const json = await response.json();
-      console.log("✅ SUCESSO! JSON RECEBIDO:", json); // <--- QUERO VER ISSO NO CONSOLE
+                    return {
+                        Name: serverRelativeUrl.split('/').pop(),
+                        Extension: itemSearch.FileExtension ? `.${itemSearch.FileExtension}` : '',
+                        ServerRelativeUrl: serverRelativeUrl,
+                        Created: realData.Created,
+                        Editor: realData.Author?.Title || itemSearch.Author,
+                        _LibraryName: libName, 
+                        Id: itemSearch.ListItemId,
+                        Summary: searchSummary // <--- AQUI ESTAVA FALTANDO!
+                    };
+                }
+            } catch (err) { 
+                // Silencioso: Se falhar ao pegar detalhes, usa dados básicos da busca
+            }
 
-      const rawRows = json.PrimaryQueryResult?.RelevantResults?.Table?.Rows || [];
+            // Retorno de Fallback (apenas dados da busca)
+            return {
+                Name: itemSearch.Title || "Arquivo",
+                Extension: itemSearch.FileExtension ? `.${itemSearch.FileExtension}` : '',
+                ServerRelativeUrl: serverRelativeUrl,
+                Created: new Date().toISOString(),
+                Editor: itemSearch.Author || "Sistema",
+                Id: index,
+                Summary: searchSummary // <--- AQUI TAMBÉM
+            };
+        });
 
-      if (rawRows.length === 0) {
-        console.warn(`🔍 0 resultados.`);
+        const results = await Promise.all(promises);
+        return results.filter(r => r !== null);
+
+    } catch (e) {
+        console.error("Erro na busca:", e);
         return [];
-      }
-
-      // 5. Mapeamento (Preenchemos dados faltantes com "Desconhecido" por enquanto)
-      return rawRows.map((row: any, index: number) => {
-          const item: any = {};
-          if (row.Cells) {
-              row.Cells.forEach((cell: any) => { item[cell.Key] = cell.Value; });
-          }
-
-          // Cálculos manuais
-          const fullPath = item.Path || "";
-          let serverRelativeUrl = "";
-          let fileNameFromPath = "";
-
-          if (fullPath) {
-              try {
-                  const urlObj = new URL(fullPath);
-                  serverRelativeUrl = decodeURIComponent(urlObj.pathname);
-                  const parts = serverRelativeUrl.split('/');
-                  fileNameFromPath = parts[parts.length - 1];
-              } catch {
-                  serverRelativeUrl = fullPath;
-              }
-          }
-
-          let nome = fileNameFromPath || item.Title || "Arquivo";
-          let ext = "";
-          if (nome.indexOf('.') > -1) ext = nome.split('.').pop() || "";
-          if (ext && ext.indexOf('.') !== 0) ext = `.${ext}`;
-
-          return {
-              Name: nome,
-              Title: item.Title || nome,
-              Extension: ext,
-              ServerRelativeUrl: serverRelativeUrl,
-              
-              // Como não pedimos na query, usamos data atual e sistema
-              // Se isso funcionar, depois adicionamos 'Created' e 'Modified'
-              Created: new Date().toISOString(), 
-              Modified: new Date().toISOString(),
-              Editor: "Sistema", 
-              Author: { Title: "Sistema" },
-              
-              Id: index,
-              key: `search-${index}`
-          };
-      });
-
-    } catch (e) {
-      console.error("❌ Erro Geral:", e);
-      return [];
     }
-  }*/
-
-    public async searchFilesNative(baseUrl: string, queryText: string): Promise<any[]> {
-    try {
-      // 1. Limpeza da URL Base
-      let cleanUrl = this.getCleanFullUrl(baseUrl);
-      cleanUrl = decodeURIComponent(cleanUrl);
-      if (cleanUrl.startsWith('http:')) cleanUrl = cleanUrl.replace('http:', 'https:');
-      if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
-
-      // 2. Prepara termo
-      let term = queryText.trim();
-      if (term.indexOf('"') === -1) {
-          if (term.indexOf(' ') === -1 && !term.endsWith('*')) {
-              term = `${term}*`;
-          }
-      }
-
-      // 3. Monta KQL
-      const kql = `${term} AND Path:"${cleanUrl}*"`;
-      
-      // --- PASSO 1: BUSCA INTELIGENTE ---
-      // Pedimos: Path (para o link), HitHighlightedSummary (para o resumo) 
-      // E O MAIS IMPORTANTE: ListId e ListItemId (para buscar os dados sem erro de URL)
-      const searchEndpoint = `${this._context.pageContext.web.absoluteUrl}/_api/search/query?querytext='${encodeURIComponent(kql)}'&selectproperties='Path,HitHighlightedSummary,ListId,ListItemId'&clienttype='ContentSearchRegular'&rowlimit=20&trimduplicates=false`;
-
-      console.log(`🔍 Passo 1 - Identificando Arquivos: [${kql}]`);
-
-      const response = await this._context.spHttpClient.get(
-        searchEndpoint,
-        SPHttpClient.configurations.v1
-      );
-
-      if (!response.ok) {
-          console.error(`❌ Erro Busca:`, await response.text());
-          return [];
-      }
-
-      const json = await response.json();
-      const rawRows = json.PrimaryQueryResult?.RelevantResults?.Table?.Rows || [];
-
-      if (rawRows.length === 0) {
-          console.warn(`🔍 0 arquivos encontrados.`);
-          return [];
-      }
-
-      console.log(`✅ ${rawRows.length} arquivos encontrados. Buscando metadados via ID...`);
-
-      // --- PASSO 2: BUSCA PELO ID (INFALÍVEL) ---
-      
-      const promises = rawRows.map(async (row: any, index: number) => {
-          // Extrai dados da busca
-          const itemSearch: any = {};
-          if (row.Cells) {
-              row.Cells.forEach((cell: any) => { itemSearch[cell.Key] = cell.Value; });
-          }
-
-          // URL e Nome
-          const fullPath = itemSearch.Path || "";
-          let serverRelativeUrl = "";
-          let fileName = "Arquivo";
-          try {
-              const urlObj = new URL(fullPath);
-              serverRelativeUrl = decodeURIComponent(urlObj.pathname);
-              const parts = serverRelativeUrl.split('/');
-              fileName = parts[parts.length - 1];
-          } catch { return null; }
-
-          // Resumo do Texto (Conteúdo encontrado)
-          let searchSummary = "";
-          if (itemSearch.HitHighlightedSummary) {
-              // Remove tags XML feias
-              searchSummary = itemSearch.HitHighlightedSummary.replace(/<[^>]*>/g, ""); 
-              if (searchSummary.length > 50) searchSummary = searchSummary.substring(0, 50) + "...";
-          }
-
-          // IDs para buscar os dados reais
-          const listId = itemSearch.ListId;
-          const itemId = itemSearch.ListItemId;
-
-          // Se tivermos os IDs, usamos a API de Lista (Zero erro de caractere especial)
-          if (listId && itemId) {
-              try {
-                  // URL Mágica: Busca na lista X o item Y. Funciona com qualquer nome de arquivo.
-                  const itemApi = `${this._context.pageContext.web.absoluteUrl}/_api/web/lists(guid'${listId}')/items(${itemId})?$select=Created,Modified,Author/Title,Editor/Title&$expand=Author,Editor`;
-                  
-                  const itemResp = await this._context.spHttpClient.get(itemApi, SPHttpClient.configurations.v1);
-                  
-                  if (itemResp.ok) {
-                      const realData = await itemResp.json();
-                      
-                      // SUCESSO!
-                      return {
-                          Name: fileName,
-                          Title: fileName,
-                          Extension: fileName.split('.').pop() ? `.${fileName.split('.').pop()}` : '',
-                          ServerRelativeUrl: serverRelativeUrl,
-                          
-                          // DATA DE CRIAÇÃO REAL
-                          Created: realData.Created, 
-                          Modified: realData.Modified,
-                          
-                          // AUTOR REAL (Nome da Pessoa)
-                          // Coloquei o resumo do texto entre parênteses para você saber onde achou
-                          Editor: realData.Author?.Title || "Desconhecido",
-                          
-                          // Se quiser ver o trecho do texto na tela, descomente abaixo:
-                          // Editor: `${realData.Author?.Title} (Encontrado: "${searchSummary}")`,
-
-                          Author: { Title: realData.Author?.Title || "Sistema" },
-                          
-                          Id: index,
-                          key: `search-${index}`
-                      };
-                  }
-              } catch (err) {
-                  console.log(`⚠️ Erro ao buscar item ${itemId}:`, err);
-              }
-          }
-
-          // Fallback (Só acontece se falhar a busca por ID)
-          return {
-              Name: fileName,
-              Title: fileName,
-              Extension: fileName.split('.').pop() ? `.${fileName.split('.').pop()}` : '',
-              ServerRelativeUrl: serverRelativeUrl,
-              Created: new Date().toISOString(),
-              Modified: new Date().toISOString(),
-              Editor: "Erro ao ler detalhes",
-              Author: { Title: "Sistema" },
-              Id: index,
-              key: `search-${index}`
-          };
-      });
-
-      const results = await Promise.all(promises);
-      return results.filter(r => r !== null);
-
-    } catch (e) {
-      console.error("❌ Erro Geral:", e);
-      return [];
-    }
-  }
+}
   // ---LOG ---
+
+public async getRecentLogs(logListUrl: string, top: number = 5): Promise<any[]> {
+    if (!logListUrl) return [];
+
+    try {
+        const urlObj = new URL(logListUrl);
+        const serverRelativePath = decodeURIComponent(urlObj.pathname);
+        
+        // Extrai o site: /sites/Docs_atual
+        const sitePath = serverRelativePath.split('/Lists/')[0];
+        const siteUrl = `${urlObj.origin}${sitePath}`;
+        
+        // Conecta na Web do subsite
+        const targetWeb = Web(siteUrl).using(SPFx(this._context));
+
+        console.log("Dashboard - Tentando buscar por Título no site:", siteUrl);
+
+        // BUSCA POR TÍTULO: É mais resiliente a erros de 404 de caminho
+        // Usamos o nome exatamente como aparece na sua imagem
+        return await targetWeb.lists.getByTitle("Log Arquivos").items
+            .select("Title", "A_x00e7__x00e3_o", "Email", "Arquivo", "Created")
+            .orderBy("Created", false)
+            .top(top)();
+
+    } catch (error) {
+        console.error("Erro ao buscar logs por título:", error);
+        return [];
+    }
+}
 
   public async getLogCount(logUrl: string, userEmail: string): Promise<number> {
     if (!logUrl) return 0;
@@ -620,7 +657,7 @@ export class SharePointService {
     }
   }
 
-  public async registrarLog(logUrl: string, nomeArquivo: string, userNome: string, userEmail: string, userId: string, ação: string, IDArquivo: string): Promise<void> {
+  public async registrarLog(logUrl: string, nomeArquivo: string, userNome: string, userEmail: string, userId: string, ação: string, IDArquivo: string, biblioteca: string): Promise<void> {
     if (!logUrl) return;
     try {
         const urlObj = new URL(logUrl);
@@ -636,7 +673,8 @@ export class SharePointService {
           Email: userEmail,
           IDSharepoint: userId,
           A_x00e7__x00e3_o: ação,
-          IDArquivo: IDArquivo
+          IDArquivo: IDArquivo, 
+          Biblioteca: biblioteca
         });
     } catch (e) {
         console.error("Service: Erro ao registrar log", e);
@@ -689,40 +727,87 @@ export class SharePointService {
 }
 
   public async checkDuplicateHash(baseUrl: string, clienteFolder: string, fileHash: string): Promise<{exists: boolean, name: string}> {
-      const targetWeb = this.getTargetWeb(baseUrl);
-      const relativePath = this.cleanPath(baseUrl);
-      
-      let listRef;
-      try {
-          // Tenta pegar como lista
-          listRef = targetWeb.getList(relativePath);
-          await listRef.select("Title")(); 
-      } catch {
-          // Fallback: tenta pegar pela pasta se a URL apontar para uma subpasta
-          try {
-            const folderAlvo = targetWeb.getFolderByServerRelativePath(relativePath);
-            listRef = (folderAlvo as any).list;
-          } catch (e) {
-            console.warn("Não foi possível identificar a lista para verificação de hash.");
-            return { exists: false, name: '' };
-          }
-      }
+    try {
+        if (!baseUrl || !fileHash) return { exists: false, name: '' };
 
-      const camlQuery = {
-        ViewXml: `<View Scope='RecursiveAll'><Query><Where><Eq><FieldRef Name='FileHash'/><Value Type='Text'>${fileHash}</Value></Eq></Where></Query><RowLimit>1</RowLimit></View>`
-      };
+        let webAlvo;
+        let caminhoBiblioteca = baseUrl;
 
-      try {
-        const duplicateFiles = await listRef.getItemsByCAMLQuery(camlQuery);
-        if (duplicateFiles && duplicateFiles.length > 0) {
-            const item = duplicateFiles[0] as any;
-            return { exists: true, name: item.FileLeafRef || item.Title || "Desconhecido" };
+        // 1. Lógica para decidir qual Web usar e limpar o caminho
+        if (baseUrl.toLowerCase().indexOf("http") === 0) {
+            // CASO 1: URL Absoluta (ex: https://site/sites/Docs)
+            try {
+                const urlObj = new URL(baseUrl);
+                caminhoBiblioteca = decodeURIComponent(urlObj.pathname);
+                
+                // Tenta extrair a URL base do site (ex: https://tenant.sharepoint.com/sites/vendas)
+                // Isso é necessário porque não se pode chamar getList em um subsite a partir da raiz
+                let siteUrl = urlObj.origin;
+                if (urlObj.pathname.indexOf('/sites/') > -1) {
+                    const parts = urlObj.pathname.split('/');
+                    const sitesIndex = parts.indexOf('sites');
+                    // Reconstrói até o nome do site: origin + /sites/ + nomeDoSite
+                    siteUrl = `${urlObj.origin}/${parts[sitesIndex]}/${parts[sitesIndex + 1]}`;
+                }
+
+                // Cria uma instância apontando para o site específico da URL
+                webAlvo = spfi(siteUrl).using(SPFx(this._context));
+
+            } catch (e) {
+                // Se falhar o parse, usa a instância local
+                webAlvo = spfi().using(SPFx(this._context));
+            }
+        } else {
+            // CASO 2: URL Relativa (ex: /Documentos) - AQUI ESTAVA O ERRO
+            caminhoBiblioteca = decodeURIComponent(baseUrl);
+            
+            // CORREÇÃO: spfi() vazio, passando o contexto dentro do SPFx()
+            webAlvo = spfi().using(SPFx(this._context));
         }
-      } catch (e) {
-        console.warn("Erro ao executar CAML Query de Hash. Verifique se a coluna FileHash existe.", e);
-      }
-      return { exists: false, name: '' };
-  }
+
+        // 2. Remove barra final se existir (evita erro no getList)
+        if (caminhoBiblioteca.endsWith('/')) {
+            caminhoBiblioteca = caminhoBiblioteca.substring(0, caminhoBiblioteca.length - 1);
+        }
+
+        console.log(`Verificando Hash: ${fileHash} em: ${caminhoBiblioteca}`);
+
+        // 3. Obtém a referência da lista
+        const listRef = webAlvo.web.getList(caminhoBiblioteca);
+
+        const camlQuery = {
+            ViewXml: `<View Scope='RecursiveAll'>
+                <Query>
+                    <Where>
+                        <Eq>
+                            <FieldRef Name='FileHash'/>
+                            <Value Type='Text'>${fileHash}</Value>
+                        </Eq>
+                    </Where>
+                </Query>
+                <RowLimit>1</RowLimit>
+            </View>`
+        };
+
+        // 4. Executa a busca
+        const duplicateFiles = await listRef.getItemsByCAMLQuery(camlQuery);
+        
+        console.log("Arquivos duplicados encontrados:", duplicateFiles.length);
+
+        if (duplicateFiles && duplicateFiles.length > 0) {
+            const item = duplicateFiles[0];
+            return { 
+                exists: true, 
+                name: item["FileLeafRef"] || item["Title"] || "Arquivo duplicado" 
+            };
+        }
+
+    } catch (e) {
+        console.error("Erro ao verificar duplicidade (checkDuplicateHash):", e);
+    }
+
+    return { exists: false, name: '' };
+}
 
   private async ensureFolder(listTitle: string, folderUrl: string): Promise<void> {
     
@@ -777,41 +862,30 @@ export class SharePointService {
 }
 
   public async uploadFile(
-  listNameInput: string,
-  folderPath: string, 
-  fileName: string,
-  fileContent: Blob | File,
-  metadata: any
+  libUrl: string,           // 1. URL da Biblioteca (vinda do Dropdown)
+  folderPath: string,       // 2. Caminho Cliente/Assunto
+  fileName: string,         // 3. Nome do Arquivo
+  fileContent: Blob | File, // 4. Conteúdo
+  metadata: any             // 5. Metadados (Hash, Responsável, etc)
 ): Promise<number> {
-  
   try {
-    // 1. Limpeza de URL (Usa a mesma lógica robusta do uploadAnexo)
-    // Isso garante que estamos pegando o caminho relativo correto da biblioteca
-    const relativeListPath = this.cleanPath(listNameInput);
-    
-    console.log(`📂 UploadFile - Alvo: [${relativeListPath}] | Pasta: [${folderPath}]`);
+    // Usa a URL que veio da tela para pegar a biblioteca correta
+    const targetFolder = await this.ensureFolderAndGetTarget(libUrl, folderPath);
 
-    // 2. Garante que a pasta existe e retorna a referência CORRETA dela
-    const targetFolder = await this.ensureFolderAndGetTarget(relativeListPath, folderPath);
-
-    // 3. Faz o Upload
-    // addUsingPath é ótimo para criar arquivos com nomes complexos
+    // Faz o upload
     await targetFolder.files.addUsingPath(fileName, fileContent, { Overwrite: true });
 
-    // 4. Recupera o Item para editar metadados
-    // AQUI ESTAVA O ERRO: Usamos getByUrl na pasta alvo, que é mais seguro que depender do retorno do add
+    // Pega o item para atualizar metadados
     const fileRef = targetFolder.files.getByUrl(fileName);
     const item = await fileRef.getItem();
 
-    // 5. Atualizar metadados
+    // Atualiza os metadados no SharePoint
     await item.update(metadata);
 
-    // 6. Retornar o ID (para o Log)
     const itemData = await item.select("Id")();
     return itemData.Id;
-
   } catch (error) {
-    console.error("❌ Erro crítico no uploadFile:", error);
+    console.error("Erro no Service uploadFile:", error);
     throw error;
   }
 }
@@ -845,48 +919,39 @@ private async ensureFolderAndGetTarget(relativeListPath: string, folderUrl: stri
   // --- Viewer e Estrutura ---
 
   public async getFolderContents(baseUrl: string, folderUrl?: string) {
-  try {
-    // 1. Limpeza de URL
-    const urlObj = new URL(baseUrl);
-    let relativePath = decodeURIComponent(urlObj.pathname);
+    try {
+      // Correção: Verifica se é URL absoluta antes de dar new URL()
+      let relativePath = baseUrl;
+      if (baseUrl.indexOf('http') === 0) {
+          const urlObj = new URL(baseUrl);
+          relativePath = decodeURIComponent(urlObj.pathname);
+      }
 
-    // 2. Define o alvo
-    const targetPath = folderUrl ? decodeURIComponent(folderUrl) : relativePath;
+      const targetPath = folderUrl ? decodeURIComponent(folderUrl) : relativePath;
 
-    // 3. Obtém a referência da pasta
-    const folder = this._sp.web.getFolderByServerRelativePath(targetPath);
+      // Remove barra final se houver
+      const cleanTarget = targetPath.endsWith('/') ? targetPath.slice(0, -1) : targetPath;
 
-    // 4. Busca as subpastas e os arquivos
-    const [folders, files] = await Promise.all([
-      folder.folders.select("Name", "ServerRelativeUrl", "ItemCount")(),
-      
-      folder.files
-        .expand("Author") 
-        // ADICIONADO: MajorVersion, UIVersionLabel e Length
-        .select(
-            "Name", 
-            "ServerRelativeUrl", 
-            "TimeLastModified", 
-            "Author/Email", 
-            "Author/Id",
-            "MajorVersion",   // <--- Necessário para a coluna de Versões
-            "UIVersionLabel", // <--- Alternativa para exibição (ex: "1.0")
-            "Length"          // <--- Necessário para a coluna de Tamanho
-        )()
-    ]);
+      const folder = this._sp.web.getFolderByServerRelativePath(cleanTarget);
 
-    // Mapeamos para garantir propriedades
-    const mappedFiles = files.map((f: any) => ({
-      ...f,
-      AuthorEmail: f.Author?.Email || "" 
-    }));
+      const [folders, files] = await Promise.all([
+        folder.folders.select("Name", "ServerRelativeUrl", "ItemCount")(),
+        folder.files
+          .expand("Author") 
+          .select("Name", "ServerRelativeUrl", "TimeLastModified", "Author/Email", "Author/Id", "MajorVersion", "Length")()
+      ]);
 
-    return { folders, files: mappedFiles };
-  } catch (error) {
-    console.error("Erro no getFolderContents:", error);
-    throw error;
+      const mappedFiles = files.map((f: any) => ({
+        ...f,
+        AuthorEmail: f.Author?.Email || "" 
+      }));
+
+      return { folders, files: mappedFiles };
+    } catch (error) {
+      console.error("Erro no getFolderContents:", error);
+      return { folders: [], files: [] };
+    }
   }
-}
 
 public async isMemberOfGroup(targetGroupId: string): Promise<boolean> {
   try {
@@ -911,9 +976,7 @@ public async isMemberOfGroup(targetGroupId: string): Promise<boolean> {
 }
 public async getSiteLibraries(): Promise<{ title: string, url: string }[]> {
   try {
-    // Filtros: 
-    // BaseTemplate eq 101 -> Apenas Bibliotecas de Documentos
-    // Hidden eq false -> Esconde bibliotecas de sistema ocultas
+    // Mantemos o filtro de BaseTemplate 101 (Documentos) e Hidden false
     const endpoint = `${this._context.pageContext.web.absoluteUrl}/_api/web/lists?$filter=BaseTemplate eq 101 and Hidden eq false&$select=Title,RootFolder/ServerRelativeUrl&$expand=RootFolder`;
 
     const response: SPHttpClientResponse = await this._context.spHttpClient.get(
@@ -923,7 +986,21 @@ public async getSiteLibraries(): Promise<{ title: string, url: string }[]> {
 
     if (response.ok) {
       const data = await response.json();
-      return data.value.map((lib: any) => {
+      
+      // Filtramos para ignorar especificamente "Ativos do Site" e variações comuns de sistema
+      const libsFiltradas = data.value.filter((lib: any) => {
+        const title = lib.Title.toLowerCase();
+        return (
+          title !== "ativos do site" && 
+          title !== "site assets" && 
+          title !== "sitepages" && 
+          title !== "páginas do site" &&
+          title !== "estilos de site" &&
+          title !== "style library"
+        );
+      });
+
+      return libsFiltradas.map((lib: any) => {
         return {
           title: lib.Title,
           url: lib.RootFolder.ServerRelativeUrl
@@ -947,6 +1024,97 @@ public async getSiteLibraries(): Promise<{ title: string, url: string }[]> {
   }
 
   // --- Edição ---
+public getPathInfo(fileUrl: string) {
+    try {
+        const urlObj = new URL(fileUrl.indexOf('http') === 0 ? fileUrl : `https://${window.location.hostname}${fileUrl}`);
+        const fullPath = decodeURIComponent(urlObj.pathname);
+        const parts = fullPath.split('/').filter(p => p);
+
+        // Estrutura típica: /sites/NomeSite/NomeBiblioteca/Pasta/Arquivo.ext
+        // Ou Raiz: /NomeBiblioteca/Pasta/Arquivo.ext
+
+        let siteUrl = urlObj.origin;
+        let libraryServerRelativeUrl = "";
+        let folderServerRelativeUrl = ""; // A pasta onde o arquivo pai está
+
+        // Verifica se é Subsite (/sites/ ou /teams/)
+        const sitesIndex = parts.findIndex(p => p.toLowerCase() === 'sites' || p.toLowerCase() === 'teams');
+        
+        if (sitesIndex > -1 && parts.length > sitesIndex + 1) {
+            // É subsite (ex: /sites/Docs_atual)
+            const siteName = parts[sitesIndex + 1];
+            siteUrl = `${urlObj.origin}/${parts[sitesIndex]}/${siteName}`;
+            
+            // A biblioteca geralmente é a próxima parte
+            if (parts.length > sitesIndex + 2) {
+                const libName = parts[sitesIndex + 2];
+                libraryServerRelativeUrl = `/${parts[sitesIndex]}/${siteName}/${libName}`;
+            }
+        } else {
+            // É Site Raiz (ex: /DocumentosCompartilhados/...)
+            // A biblioteca é a primeira parte
+            if (parts.length > 0) {
+                libraryServerRelativeUrl = `/${parts[0]}`;
+            }
+        }
+
+        // A pasta do arquivo é o caminho completo removendo o nome do arquivo
+        folderServerRelativeUrl = fullPath.substring(0, fullPath.lastIndexOf('/'));
+
+        return {
+            siteUrl,         // URL absoluta do site (ex: https://.../sites/Docs_atual)
+            libraryUrl: libraryServerRelativeUrl, // Caminho relativo da lib (ex: /sites/Docs_atual/Juridico)
+            folderUrl: folderServerRelativeUrl    // Caminho da pasta onde o arquivo está
+        };
+
+    } catch (e) {
+        console.error("Erro ao extrair caminhos:", e);
+        return null;
+    }
+}
+public async uploadAnexoDinamico(
+    mainFileUrl: string,    // A URL do arquivo que estamos editando
+    fileName: string,       // Nome do novo arquivo/anexo
+    fileContent: Blob | File, 
+    metadata: any 
+): Promise<number> { 
+    try {
+        // 1. Descobre tudo sozinho olhando a URL do arquivo pai
+        const info = this.getPathInfo(mainFileUrl);
+        
+        if (!info) throw new Error("Não foi possível detectar a biblioteca do arquivo.");
+
+        console.log(`Upload Dinâmico detectado:
+            Site: ${info.siteUrl}
+            Lib: ${info.libraryUrl}
+            Pasta: ${info.folderUrl}
+        `);
+
+        // 2. Conecta no site correto
+        const targetWeb = Web(info.siteUrl).using(SPFx(this._context));
+
+        // 3. Upload na pasta correta
+        // addUsingPath retorna IFileInfo, que não tem .file direto
+        await targetWeb.getFolderByServerRelativePath(info.folderUrl)
+            .files.addUsingPath(fileName, fileContent, { Overwrite: true });
+
+        // 4. CORREÇÃO: Pegamos a referência do arquivo recém-criado pelo caminho
+        // para então pegar o Item de lista associado
+        const fileRef = targetWeb.getFileByServerRelativePath(`${info.folderUrl}/${fileName}`);
+        const item = await fileRef.getItem();
+
+        // 5. Atualiza metadados (Vincula o IDPai, etc)
+        await item.update(metadata);
+
+        // 6. Retorna ID
+        const itemData = await item.select("Id")();
+        return itemData.Id;
+
+    } catch (error) {
+        console.error("❌ Erro no uploadAnexoDinamico:", error);
+        throw error;
+    }
+}
   public async getFileMetadata(fileUrl: string): Promise<any> {
     try {
         const file = this._sp.web.getFileByServerRelativePath(fileUrl);
@@ -971,26 +1139,56 @@ public async getSiteLibraries(): Promise<{ title: string, url: string }[]> {
     }
 }
 
-  public async getRelatedFiles(mainFileId: number, libraryUrl: string): Promise<any[]> {
+  public async getRelatedFiles(parentFileUrl: string, parentId: number): Promise<any[]> {
     try {
-        const relativePath = this.cleanPath(libraryUrl);
+        // 1. Descobre onde estamos (Site, Biblioteca e Pasta) baseado no arquivo pai
+        const info = this.getPathInfo(parentFileUrl);
         
-        // 1. Adicionamos "Created" (e "Title" se quiser usar o nome amigável)
-        const items = await this._sp.web.getList(relativePath).items
-            .filter(`IDPai eq ${mainFileId}`) 
-            .select("Id", "FileLeafRef", "FileRef", "Created", "Title")(); // <--- Created adicionado
-            
-        // 2. Mapeamos para o formato padrão que a sua UI espera
-        return items.map(i => ({
+        if (!info || !parentId) return [];
+
+        console.log(`Buscando anexos em:
+            Site: ${info.siteUrl}
+            Lib: ${info.libraryUrl}
+            Pasta: ${info.folderUrl}
+            ID Pai: ${parentId}
+        `);
+
+        // 2. Conecta no site correto
+        const targetWeb = Web(info.siteUrl).using(SPFx(this._context));
+
+        // 3. Busca na lista correta
+        // Filtramos pelo IDPai e garantimos que não estamos pegando o próprio arquivo
+        const items = await targetWeb.getList(info.libraryUrl).items
+            .select("Id", "FileLeafRef", "FileRef", "Created", "Title", "FileDirRef", "IDPai")
+            .filter(`IDPai eq '${parentId}' and Id ne ${parentId}`) 
+            .expand("File") 
+            ();
+
+        // 4. Filtragem Extra: Garante que está na MESMA PASTA (Cliente/Assunto)
+        // Isso evita pegar arquivos com mesmo IDPai mas que foram movidos para outro lugar
+        const folderPathLower = info.folderUrl.toLowerCase();
+        
+        const filteredItems = items.filter(i => {
+            const itemDir = (i.FileDirRef || "").toLowerCase();
+            // Verifica se o caminho da pasta é exatamente igual
+            return itemDir.endsWith(folderPathLower) || itemDir === folderPathLower;
+        });
+
+        // 5. Mapeia para o formato visual
+        return filteredItems.map(i => ({
             Id: i.Id,
-            Name: i.FileLeafRef, // O nome físico do arquivo (com extensão)
-            Title: i.Title,      // O nome amigável (se tiver)
+            Name: i.FileLeafRef,
+            Title: i.Title,
             ServerRelativeUrl: i.FileRef,
-            Created: i.Created   // A data agora estará disponível
+            Created: i.Created
         }));
 
-    } catch (e) {
-        console.error("Erro ao buscar anexos:", e);
+    } catch (e: any) {
+        // Ignora 404 silenciosamente (caso a pasta/lista não exista ou esteja vazia)
+        const isNotFound = e?.status === 404 || (e?.message && e.message.indexOf('FileNotFound') > -1);
+        if (!isNotFound) {
+            console.error("Erro ao buscar anexos:", e);
+        }
         return [];
     }
 }
@@ -1305,4 +1503,36 @@ public async addPermissionToLibrary(libTitle: string, userEmail: string, roleDef
       throw new Error("Falha ao vincular permissão na biblioteca.");
     }
   }
+
+public async getSharePointGroupMembers(groupName: string): Promise<any[]> {
+    try {
+        // Tenta pegar o ID do grupo pelo nome
+        const group = await this.ensureSharePointGroup(groupName); // Reaproveita seu método que retorna o ID ou garante existencia
+        
+        // Busca usuários
+        const endpoint = `${this._context.pageContext.web.absoluteUrl}/_api/web/sitegroups(${group})/users`;
+        const response = await this._context.spHttpClient.get(endpoint, SPHttpClient.configurations.v1);
+        
+        if (response.ok) {
+            const json = await response.json();
+            return json.value; // Retorna array de usuários/grupos
+        }
+        return [];
+    } catch (e) {
+        console.warn(`Grupo ${groupName} não encontrado ou sem acesso.`);
+        return [];
+    }
+}
+
+public async getAzureADGroupMembers(azureGroupId: string): Promise<any[]> {
+    try {
+        const client = await this._context.msGraphClientFactory.getClient("3");
+        // Pega membros transitivos (pega membros de grupos dentro de grupos)
+        const response = await client.api(`/groups/${azureGroupId}/transitiveMembers`).select('id,displayName,userPrincipalName,mail').get();
+        return response.value || [];
+    } catch (e) {
+        console.error("Erro Graph:", e);
+        return [];
+    }
+}
 }

@@ -14,4 +14,5 @@ export interface IWebPartArquivosProps {
   colorAccent: string;     // Destaque
   colorFont: string;      // Fonte
   context: WebPartContext;
+  imagemLogo: string
 }
